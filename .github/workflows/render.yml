@@ -1,0 +1,109 @@
+name: Render videos
+
+# Started by the dashboard when new video scripts are ready; the timer is only a fallback.
+on:
+  schedule:
+    - cron: '23 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: render
+  cancel-in-progress: false
+
+env:
+  HYPIT_SHA: 67c15455832cea5eed8198407c488116921f5e6a
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Anything to do?
+        id: check
+        env:
+          JOBS_URL: ${{ secrets.JOBS_URL }}
+        run: |
+          if [ -z "$JOBS_URL" ]; then echo "not connected yet"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          code=$(curl -s -o /tmp/jobs.bin -w '%{http_code}' "$JOBS_URL" || echo 000)
+          if [ "$code" = "200" ] && [ -s /tmp/jobs.bin ]; then echo "go=true" >> "$GITHUB_OUTPUT"; else echo "no jobs ($code)"; echo "go=false" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.go == 'true'
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.go == 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Caches
+        if: steps.check.outputs.go == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/ms-playwright
+            ~/.local/share/pnpm/store
+            .cache
+          key: render-v1-${{ env.HYPIT_SHA }}-${{ hashFiles('package.json') }}
+
+      - name: Install tools
+        if: steps.check.outputs.go == 'true'
+        run: |
+          pip install --quiet numpy==2.2.6 scipy==1.15.3
+          npm install --no-audit --no-fund --loglevel=error
+          npx playwright install chromium-headless-shell
+          CHROME=$(ls -d ~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell | tail -1)
+          echo "CHROME_SHELL=$CHROME" >> "$GITHUB_ENV"
+          git clone --quiet --filter=blob:none https://github.com/hypit-ai/hypit.git .hypit-src
+          git -C .hypit-src checkout --quiet "$HYPIT_SHA"
+          mkdir -p .hypit-src/examples/autoposter/packages .hypit-src/examples/autoposter/assets
+          cp -r scene .hypit-src/examples/autoposter/packages/scene
+          cp project/* .hypit-src/examples/autoposter/
+          cd .hypit-src
+          corepack enable
+          pnpm add -w --silent @fontsource/luckiest-guy@5.3.0 @fontsource-variable/fredoka@5.3.0
+          pnpm install --silent
+          pnpm build:public-types > /dev/null
+          pnpm --filter @autoposter/scene build
+          node -e "const fs=require('fs');fs.writeFileSync('examples/autoposter/hypit.runtime.json',JSON.stringify({format:'hypit.runtime-local@1',dataRoot:'.hypit/runtimes/local',endpoints:{'media.local':{use:'@hypit/media-local',config:{defaultConcurrency:2}},'html.local':{use:'@hypit/provider-html-local',config:{chromePath:process.env.CHROME_SHELL,workers:4,defaultConcurrency:1}}}},null,2))"
+          node bin/hypit.mjs runtime up --project examples/autoposter --runtime examples/autoposter/hypit.runtime.json > /dev/null
+
+      - name: Get earlier videos
+        if: steps.check.outputs.go == 'true'
+        run: |
+          URL="https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$URL" out >/dev/null 2>&1; then
+            git clone --quiet --depth 1 --branch out --single-branch "$URL" out
+          else
+            mkdir -p out
+          fi
+
+      - name: Render
+        id: render
+        if: steps.check.outputs.go == 'true'
+        env:
+          JOB_KEY: ${{ secrets.JOB_KEY }}
+          HYPIT_DIR: .hypit-src
+          MODEL_CACHE: .cache
+        run: node tools/build.mjs --out out --jobs /tmp/jobs.bin
+
+      - name: Save videos
+        if: always() && steps.check.outputs.go == 'true' && steps.render.outputs.changed == 'true'
+        run: |
+          cd out
+          rm -rf .git
+          git init -q -b out
+          git config user.name "render"
+          git config user.email "render@users.noreply.github.com"
+          git add -A
+          git commit -q --allow-empty -m "Videos"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" out:out
