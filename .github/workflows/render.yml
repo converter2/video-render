@@ -61,7 +61,10 @@ jobs:
           pip install --quiet numpy==2.2.6 scipy==1.15.3
           npm install --no-audit --no-fund --loglevel=error
           npx playwright install chromium-headless-shell
-          CHROME=$(ls -d ~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell | tail -1)
+          CHROME=$(ls -d ~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell | sort -V | tail -1)
+          if [ ! -x "$CHROME" ]; then echo "browser not found"; exit 1; fi
+          # exported here as well: a value added to GITHUB_ENV only reaches the later steps
+          export CHROME_SHELL="$CHROME"
           echo "CHROME_SHELL=$CHROME" >> "$GITHUB_ENV"
           git clone --quiet --filter=blob:none https://github.com/hypit-ai/hypit.git .hypit-src
           git -C .hypit-src checkout --quiet "$HYPIT_SHA"
@@ -75,7 +78,8 @@ jobs:
           pnpm build:public-types > /dev/null
           pnpm --filter @autoposter/scene build
           node -e "const fs=require('fs');fs.writeFileSync('examples/autoposter/hypit.runtime.json',JSON.stringify({format:'hypit.runtime-local@1',dataRoot:'.hypit/runtimes/local',endpoints:{'media.local':{use:'@hypit/media-local',config:{defaultConcurrency:2}},'html.local':{use:'@hypit/provider-html-local',config:{chromePath:process.env.CHROME_SHELL,workers:4,defaultConcurrency:1}}}},null,2))"
-          node bin/hypit.mjs runtime up --project examples/autoposter --runtime examples/autoposter/hypit.runtime.json > /dev/null
+          grep -q chromePath examples/autoposter/hypit.runtime.json || { echo "browser path missing from the render settings"; exit 1; }
+          node bin/hypit.mjs runtime up --project examples/autoposter --runtime examples/autoposter/hypit.runtime.json
 
       - name: Get earlier videos
         if: steps.check.outputs.go == 'true'
