@@ -58,6 +58,12 @@ jobs:
       - name: Install tools
         if: steps.check.outputs.go == 'true'
         run: |
+          # FFmpeg (with ffprobe) reads, mixes and encodes the video; the runners do not ship it
+          if ! command -v ffprobe >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg > /dev/null
+          fi
+          ffmpeg -version | head -1
           pip install --quiet numpy==2.2.6 scipy==1.15.3
           npm install --no-audit --no-fund --loglevel=error
           npx playwright install chromium-headless-shell
