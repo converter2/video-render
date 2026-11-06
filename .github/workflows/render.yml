@@ -1,6 +1,7 @@
 name: Render videos
 
-# Started by the dashboard when new video scripts are ready; the timer is only a fallback.
+# Writes new video scripts (Claude) and renders the videos. Started by the dashboard when you press a Make videos
+# button; the timer tops up every website's video schedule. Public repositories get unlimited free minutes.
 on:
   schedule:
     - cron: '23 */3 * * *'
@@ -19,7 +20,7 @@ env:
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,11 +29,13 @@ jobs:
       - name: Anything to do?
         id: check
         env:
-          JOBS_URL: ${{ secrets.JOBS_URL }}
+          PLAN_URL: ${{ secrets.PLAN_URL }}
+          PLAN_TOKEN: ${{ secrets.PLAN_TOKEN }}
         run: |
-          if [ -z "$JOBS_URL" ]; then echo "not connected yet"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          code=$(curl -s -o /tmp/jobs.bin -w '%{http_code}' "$JOBS_URL" || echo 000)
-          if [ "$code" = "200" ] && [ -s /tmp/jobs.bin ]; then echo "go=true" >> "$GITHUB_OUTPUT"; else echo "no jobs ($code)"; echo "go=false" >> "$GITHUB_OUTPUT"; fi
+          if [ -z "$PLAN_URL" ] || [ -z "$PLAN_TOKEN" ]; then echo "not connected yet: run Autoposter-Setup.cmd"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # the request stays on this runner only; it is never printed or saved in the repository
+          code=$(curl -s -o "$RUNNER_TEMP/plan.json" -w '%{http_code}' -H "authorization: Bearer $PLAN_TOKEN" "$PLAN_URL?claim=1" || echo 000)
+          if [ "$code" = "200" ] && grep -q '"site"' "$RUNNER_TEMP/plan.json"; then echo "go=true" >> "$GITHUB_OUTPUT"; else echo "nothing to do ($code)"; echo "go=false" >> "$GITHUB_OUTPUT"; fi
 
       - uses: actions/setup-node@v4
         if: steps.check.outputs.go == 'true'
@@ -97,6 +100,15 @@ jobs:
             mkdir -p out
           fi
 
+      - name: Write scripts
+        id: plan
+        if: steps.check.outputs.go == 'true'
+        env:
+          JOB_KEY: ${{ secrets.JOB_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CHROME_PATH: ${{ env.CHROME_SHELL }}
+        run: node tools/plan.mjs --plan "$RUNNER_TEMP/plan.json" --out out --jobs "$RUNNER_TEMP/jobs.json"
+
       - name: Render
         id: render
         if: steps.check.outputs.go == 'true'
@@ -104,12 +116,14 @@ jobs:
           JOB_KEY: ${{ secrets.JOB_KEY }}
           HYPIT_DIR: .hypit-src
           MODEL_CACHE: .cache
-        run: node tools/build.mjs --out out --jobs /tmp/jobs.bin
+        run: node tools/build.mjs --out out --jobs-json "$RUNNER_TEMP/jobs.json"
 
       - name: Save videos
-        if: always() && steps.check.outputs.go == 'true' && steps.render.outputs.changed == 'true'
+        if: always() && steps.check.outputs.go == 'true' && hashFiles('out/plans.bin', 'out/index.bin') != ''
         run: |
           cd out
+          # nothing new: leave the branch alone, so the private repo is not woken for nothing
+          if [ -d .git ] && [ -z "$(git status --porcelain)" ]; then echo "no changes"; exit 0; fi
           rm -rf .git
           git init -q -b out
           git config user.name "render"

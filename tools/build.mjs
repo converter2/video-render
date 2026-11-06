@@ -17,13 +17,13 @@ const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf('--' + n); return i < 0 ? d : args[i + 1]; };
 const OUT = path.resolve(opt('out', 'out'));
 const WORK = path.resolve(opt('work', path.join(REPO, 'work')));
-const LIMIT = Number(opt('limit', process.env.RENDER_LIMIT || 8));
+const LIMIT = Number(opt('limit', process.env.RENDER_LIMIT || 40));
 const ONLY = opt('only', '');
 const HYPIT = path.resolve(process.env.HYPIT_DIR || path.join(REPO, '.hypit-src'));
 const PROJECT = path.join(HYPIT, 'examples', 'autoposter');
 const CACHE = path.resolve(process.env.MODEL_CACHE || path.join(REPO, '.cache'));
 const AHEAD_MS = 4 * 86400000;
-const BUDGET_MS = Number(process.env.RENDER_BUDGET_MIN || 50) * 60000;
+const BUDGET_MS = Number(process.env.RENDER_BUDGET_MIN || 150) * 60000;
 const STARTED = Date.now();
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -41,6 +41,8 @@ function run(cmd, argv, opts = {}) {
 
 async function loadJobs(key) {
   let text = '';
+  const plain = opt('jobs-json', '');
+  if (plain) return JSON.parse(fs.readFileSync(plain, 'utf8'));
   const file = opt('jobs', '');
   if (file) text = fs.readFileSync(file, 'utf8');
   else {
@@ -153,7 +155,7 @@ async function main() {
     fs.rmSync(path.join(WORK, fk), { recursive: true, force: true });
     fs.writeFileSync(indexFile, sealJson({ ...index, updated: new Date().toISOString() }, key));
   }
-  fs.writeFileSync(indexFile, sealJson({ ...index, updated: new Date().toISOString() }, key));
+  if (made || pruned || todo.length || !fs.existsSync(indexFile)) fs.writeFileSync(indexFile, sealJson({ ...index, updated: new Date().toISOString() }, key));
   log(`done: ${made} new`);
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `changed=${made || todo.length || pruned ? 'true' : 'false'}\n`);
 }
