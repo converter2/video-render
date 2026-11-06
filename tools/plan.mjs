@@ -12,7 +12,7 @@ const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf('--' + n); return i < 0 ? d : args[i + 1]; };
 const OUT = path.resolve(opt('out', 'out'));
 const STARTED = Date.now();
-const BUDGET_MS = Number(process.env.PLAN_BUDGET_MIN || 40) * 60000;
+const BUDGET_MS = Number(process.env.PLAN_BUDGET_MIN || 50) * 60000;
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const redact = s => String(s || '').replace(/https?:\/\/\S+/g, '<url>').replace(/"[^"]*"/g, '"…"').slice(0, 300);
 
@@ -27,9 +27,10 @@ async function main() {
   const before = canon(plans);
   const now = Date.now();
   const sites = (req.sites || []).filter(x => x.site && videoOn(x.site) && x.site.enabled !== false);
-  // scripts the private repo already has are dropped from here; the rest are still waiting to be collected
+  // every script stays here (sealed) until its video has gone out: the private repo only keeps a short copy,
+  // so the dashboard stays quick, and the videos are made from these
   const known = new Set(sites.flatMap(x => (x.videos || []).map(v => v.id)));
-  plans.items = (plans.items || []).filter(p => !known.has(p.item.id) && Date.parse(p.item.publish_at) > now - 3600000);
+  plans.items = (plans.items || []).filter(p => Date.parse(p.item.publish_at) > now - 6 * 3600000);
   plans.notes = plans.notes || {};
 
   let browser = null;
@@ -43,7 +44,7 @@ async function main() {
   }
   try {
     for (const x of want) {
-      const pending = plans.items.filter(p => p.site === x.site.id).map(p => p.item);
+      const pending = plans.items.filter(p => p.site === x.site.id && !known.has(p.item.id)).map(p => p.item);
       const S = {
         site: x.site, report: { errors: [] },
         videos: [...(x.videos || []), ...pending],
@@ -70,8 +71,13 @@ async function main() {
   const jobs = [];
   for (const x of sites) {
     const skips = new Set(x.skips || []);
-    const all = [...(x.videos || []), ...plans.items.filter(p => p.site === x.site.id).map(p => p.item)];
-    for (const v of all) {
+    // the private repo's list says what is still wanted (and catches older videos that kept their script there);
+    // the full scripts come from here
+    const full = new Map(plans.items.filter(p => p.site === x.site.id).map(p => [p.item.id, p.item]));
+    const all = new Map();
+    for (const v of x.videos || []) all.set(v.id, v.beats?.length ? v : full.get(v.id) && full.get(v.id).hash === v.hash ? full.get(v.id) : v);
+    for (const [id, v] of full) if (!all.has(id)) all.set(id, v);
+    for (const v of all.values()) {
       if (skips.has(v.id) || Date.parse(v.publish_at) < now - 3600000 || !v.beats?.length) continue;
       jobs.push({ id: v.id, site: x.site.id, hash: v.hash, publish_at: v.publish_at, url: v.url, domain: x.site.domain.replace(/^www\./, ''),
         source: v.source, cover: v.cover, mascot: v.mascot, theme: v.theme, voice: v.voice,
@@ -79,7 +85,7 @@ async function main() {
     }
   }
   fs.writeFileSync(opt('jobs'), JSON.stringify({ made: new Date().toISOString(), jobs }));
-  log(`scripts waiting to be collected: ${plans.items.length}; videos needed: ${jobs.length}`);
+  log(`scripts kept: ${plans.items.length}; videos needed: ${jobs.length}`);
 }
 
 main().catch(e => { console.log('script writing stopped:', redact(e.message)); process.exit(1); });

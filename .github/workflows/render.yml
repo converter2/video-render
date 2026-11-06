@@ -1,6 +1,7 @@
 name: Render videos
 
-# Writes new video scripts (Claude) and renders the videos. Started by the dashboard when you press a Make videos
+# Writes new video scripts (Claude) and renders the videos, keeping at least 15 days ready.
+# Finished videos are kept (sealed) as release files, one release per publishing day. Started by the dashboard when you press a Make videos
 # button; the timer tops up every website's video schedule. Public repositories get unlimited free minutes.
 on:
   schedule:
@@ -20,7 +21,7 @@ env:
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
         with:
@@ -114,6 +115,7 @@ jobs:
         if: steps.check.outputs.go == 'true'
         env:
           JOB_KEY: ${{ secrets.JOB_KEY }}
+          GH_TOKEN: ${{ github.token }}
           HYPIT_DIR: .hypit-src
           MODEL_CACHE: .cache
         run: node tools/build.mjs --out out --jobs-json "$RUNNER_TEMP/jobs.json"
@@ -124,10 +126,14 @@ jobs:
           cd out
           # nothing new: leave the branch alone, so the private repo is not woken for nothing
           if [ -d .git ] && [ -z "$(git status --porcelain)" ]; then echo "no changes"; exit 0; fi
-          rm -rf .git
-          git init -q -b out
-          git config user.name "render"
-          git config user.email "render@users.noreply.github.com"
+          git config --global user.name "render"
+          git config --global user.email "render@users.noreply.github.com"
+          if [ -d .git ]; then
+            # a fresh single commit each time; git still knows what the server has, so only changed files are sent
+            git checkout -q --orphan next
+          else
+            git init -q -b next
+          fi
           git add -A
           git commit -q --allow-empty -m "Videos"
-          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" out:out
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" next:out

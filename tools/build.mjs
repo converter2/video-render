@@ -10,6 +10,7 @@ import { keyFrom, seal, openJson, sealJson, fileKey } from './seal.mjs';
 import { buildScript } from './script.mjs';
 import { buildSvml } from './svml.mjs';
 import { speakAll } from './voice.mjs';
+import { storeReady, dayTag, put, drop, tidy } from './store.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -17,13 +18,13 @@ const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf('--' + n); return i < 0 ? d : args[i + 1]; };
 const OUT = path.resolve(opt('out', 'out'));
 const WORK = path.resolve(opt('work', path.join(REPO, 'work')));
-const LIMIT = Number(opt('limit', process.env.RENDER_LIMIT || 40));
+const LIMIT = Number(opt('limit', process.env.RENDER_LIMIT || 90));
 const ONLY = opt('only', '');
 const HYPIT = path.resolve(process.env.HYPIT_DIR || path.join(REPO, '.hypit-src'));
 const PROJECT = path.join(HYPIT, 'examples', 'autoposter');
 const CACHE = path.resolve(process.env.MODEL_CACHE || path.join(REPO, '.cache'));
-const AHEAD_MS = 4 * 86400000;
-const BUDGET_MS = Number(process.env.RENDER_BUDGET_MIN || 150) * 60000;
+const AHEAD_MS = 32 * 86400000;     // everything planned is made, nearest first (scripts are written 15 to 30 days ahead)
+const BUDGET_MS = Number(process.env.RENDER_BUDGET_MIN || 200) * 60000;
 const STARTED = Date.now();
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
@@ -122,12 +123,29 @@ async function main() {
   const { jobs = [] } = await loadJobs(key);
   const now = Date.now();
   const live = new Set(jobs.map(j => j.id));
+  const useStore = storeReady();
   let pruned = 0;
-  // drop videos that are no longer planned, so this branch only ever holds what is still needed
+  // drop videos that are no longer planned, so storage only ever holds what is still needed
   for (const [id, it] of Object.entries(index.items)) {
     if (live.has(id)) continue;
+    if (it.tag && useStore) { try { for (const a of it.a || []) await drop(a); } catch (e) { log(redact(e.message)); continue; } }
     for (const ext of ['v', 't']) if (it.f) fs.rmSync(path.join(OUT, `${it.f}.${ext}`), { force: true });
     delete index.items[id];
+    pruned++;
+  }
+  // videos made before release storage was used: move them there, so the branch stays small
+  if (useStore) for (const [id, it] of Object.entries(index.items)) {
+    if (it.tag || !it.f) continue;
+    const job = jobs.find(j => j.id === id);
+    const v = path.join(OUT, `${it.f}.v`), t = path.join(OUT, `${it.f}.t`);
+    if (job && fs.existsSync(v)) {
+      try {
+        const tag = dayTag(job.publish_at);
+        it.a = [await put(tag, `${it.f}.v`, fs.readFileSync(v)), fs.existsSync(t) ? await put(tag, `${it.f}.t`, fs.readFileSync(t)) : 0];
+        it.tag = tag;
+      } catch (e) { log('moving an older video failed:', redact(e.message)); continue; }
+    } else delete index.items[id];
+    fs.rmSync(v, { force: true }); fs.rmSync(t, { force: true });
     pruned++;
   }
   const todo = jobs.filter(j => (!ONLY || j.id === ONLY) && Date.parse(j.publish_at) > now - 3600000 && Date.parse(j.publish_at) < now + AHEAD_MS)
@@ -142,9 +160,18 @@ async function main() {
     try {
       const r = await renderOne(job, path.join(WORK, fk));
       const video = fs.readFileSync(r.final);
-      fs.writeFileSync(path.join(OUT, `${fk}.v`), seal(video, key));
-      fs.writeFileSync(path.join(OUT, `${fk}.t`), seal(fs.readFileSync(r.thumb), key));
-      index.items[job.id] = { hash: job.hash, f: fk, dur: r.duration, bytes: video.length, at: Date.now() };
+      const sv = seal(video, key), stb = seal(fs.readFileSync(r.thumb), key);
+      const prev = index.items[job.id];
+      if (useStore) {
+        const tag = dayTag(job.publish_at);
+        if (prev?.tag) for (const a of prev.a || []) await drop(a).catch(() => {});
+        const a = [await put(tag, `${fk}.v`, sv), await put(tag, `${fk}.t`, stb)];
+        index.items[job.id] = { hash: job.hash, f: fk, tag, a, dur: r.duration, bytes: video.length, at: Date.now() };
+      } else {
+        fs.writeFileSync(path.join(OUT, `${fk}.v`), sv);
+        fs.writeFileSync(path.join(OUT, `${fk}.t`), stb);
+        index.items[job.id] = { hash: job.hash, f: fk, dur: r.duration, bytes: video.length, at: Date.now() };
+      }
       made++;
       log(`rendered ${fk} in ${Math.round((Date.now() - t0) / 1000)}s`);
     } catch (e) {
@@ -154,6 +181,10 @@ async function main() {
     }
     fs.rmSync(path.join(WORK, fk), { recursive: true, force: true });
     fs.writeFileSync(indexFile, sealJson({ ...index, updated: new Date().toISOString() }, key));
+  }
+  if (useStore) {
+    try { const n = await tidy(new Set(Object.values(index.items).map(it => it.tag).filter(Boolean))); if (n) log(`removed ${n} finished day${n > 1 ? 's' : ''} from storage`); }
+    catch (e) { log('storage tidy-up skipped:', redact(e.message)); }
   }
   if (made || pruned || todo.length || !fs.existsSync(indexFile)) fs.writeFileSync(indexFile, sealJson({ ...index, updated: new Date().toISOString() }, key));
   log(`done: ${made} new`);

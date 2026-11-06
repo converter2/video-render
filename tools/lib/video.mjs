@@ -319,7 +319,8 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
   const now = Date.now();
   const tz = site.timezone || 'UTC';
   const today = localYmd(new Date(), tz);
-  const days = Math.max(1, Math.min(4, Number(site.video.plan_days || 3)));
+  // at least 15 days of videos are kept ready, so posting carries on for two weeks even if Claude stops answering
+  const days = Math.max(15, Math.min(30, Number(site.video.plan_days) || 16));
   const used = new Set(S.videos.map(v => v.slot));
   // "Make a video now": one extra video for today, 90 minutes out, outside the normal schedule (you can post it sooner from the dashboard)
   const open = makeNow ? [{ key: `${today}#now${Date.now().toString(36)}`, at: new Date(Math.ceil((now + 90 * 60000) / 300000) * 300000) }]
