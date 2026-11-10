@@ -70,7 +70,7 @@ jobs:
           ffmpeg -version | head -1
           pip install --quiet numpy==2.2.6 scipy==1.15.3
           npm install --no-audit --no-fund --loglevel=error
-          npx playwright install chromium-headless-shell
+          npx playwright install chromium-headless-shell ffmpeg
           CHROME=$(ls -d ~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell | sort -V | tail -1)
           if [ ! -x "$CHROME" ]; then echo "browser not found"; exit 1; fi
           # exported here as well: a value added to GITHUB_ENV only reaches the later steps

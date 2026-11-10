@@ -40,10 +40,23 @@ function mentions(show, item) {
 
 const PART_SFX = { headlight: 'fizz', taillight: 'fizz', spring: 'boing', wiper: 'squeak', tyre: 'pop' };
 
+/** Tutorials: the voice text of a beat cut into caption groups of a few words, kept to sentence and comma breaks. */
+export function linesFrom(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/).filter(Boolean).map(sentence => {
+    const out = []; let cur = [];
+    for (const w of sentence.split(' ')) {
+      cur.push(w);
+      if (cur.length >= 5 || (cur.length >= 3 && /[,;:]$/.test(w))) { out.push(cur.join(' ')); cur = []; }
+    }
+    if (cur.length) { if (cur.length < 2 && out.length) out[out.length - 1] += ' ' + cur.join(' '); else out.push(cur.join(' ')); }
+    return out.map(g => ({ show: g, say: g }));
+  });
+}
+
 /** Script for audio.py: each beat's sentences as [shown, spoken] caption groups plus timed cues. */
 export function buildScript(job) {
   const beats = job.beats.map((b, bi) => {
-    const sentences = (b.lines || []).map(line => line.map(g => [String(g.show || '').trim(), spokenNumbers(g.say || g.show || '')]).filter(g => g[0] && g[1]))
+    const sentences = (b.lines?.length ? b.lines : linesFrom(b.voice)).map(line => line.map(g => [String(g.show || '').trim(), spokenNumbers(g.say || g.show || '')]).filter(g => g[0] && g[1]))
       .filter(l => l.length);
     if (!sentences.length) sentences.push([[b.title || b.kicker || ' ', spokenNumbers(b.title || b.kicker || 'Here it is.')]]);
     const flat = sentences.flatMap((s, si) => s.map((g, gi) => ({ si, gi, show: g[0] })));

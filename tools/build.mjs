@@ -10,6 +10,7 @@ import { keyFrom, seal, openJson, sealJson, fileKey } from './seal.mjs';
 import { buildScript } from './script.mjs';
 import { buildSvml } from './svml.mjs';
 import { speakAll } from './voice.mjs';
+import { recordPage, slideshow } from './record.mjs';
 import { storeReady, dayTag, put, drop, tidy } from './store.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -105,12 +106,39 @@ async function renderOne(job, w) {
   if (!id) throw new Error('render finished without a build id');
   const raw = path.join(w, 'raw.mp4'), final = path.join(w, 'final.mp4'), thumb = path.join(w, 'thumb.jpg');
   hypit(['get', id, '--output', 'final.video', '--to', raw]);
-  run('ffmpeg', ['-v', 'error', '-y', '-i', raw, '-c:v', 'copy', '-af', 'loudnorm=I=-14:TP=-1.5:LRA=7', '-ar', '48000', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', final]);
-  // thumbnail: the cover frame at full size (YouTube and Facebook take it as the video's thumbnail)
-  const at = job.cover?.text ? 0.2 : Math.min(Math.max(1, (timing.beats[1]?.start || 3) - 0.4), timing.duration - 0.5);
-  run('ffmpeg', ['-v', 'error', '-y', '-ss', String(at), '-i', final, '-frames:v', '1', '-q:v', '3', thumb]);
+  const loud = ['-af', 'loudnorm=I=-14:TP=-1.5:LRA=7', '-ar', '48000', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart'];
+  if (job.format === 'tutorial') {
+    // the "test it" parts: a recording of the real tool page, laid into the browser window drawn in the scene
+    const S = { x: 80, y: 256, w: 1180, h: 646 };
+    const parts = [];
+    for (const [i, b] of job.beats.entries()) if (b.kind === 'screen') {
+      const s0 = timing.beats[i].start + 0.35, s1 = (timing.beats[i + 1]?.start ?? timing.duration) - 0.35;
+      try {
+        const shots = (process.env.TUTORIAL_SHOTS || '').split(',').filter(Boolean);
+        const clip = shots.length ? slideshow(shots, s1 - s0 + 1, path.join(w, `rec${i}.mp4`), run) : await recordPage(job.url, s1 - s0 + 1, path.join(w, `rec${i}`), run);
+        parts.push({ ...clip, s0, s1 });
+      } catch (e) { log('page recording failed, the video goes out without it:', redact(e.message)); }
+    }
+    const inputs = parts.flatMap(p => ['-i', p.file]);
+    let chain = '', last = '0:v';
+    parts.forEach((p, j) => {
+      chain += `[${j + 1}:v]trim=start=${p.lead.toFixed(2)},setpts=PTS-STARTPTS,scale=${S.w}:${S.h}:force_original_aspect_ratio=decrease,pad=${S.w}:${S.h}:(ow-iw)/2:(oh-ih)/2:color=0x2A2A2A,fps=30,setpts=PTS+${p.s0.toFixed(2)}/TB[r${j}];`;
+      chain += `[${last}][r${j}]overlay=${S.x}:${S.y}:enable='between(t,${p.s0.toFixed(2)},${p.s1.toFixed(2)})':eof_action=pass[v${j}];`;
+      last = `v${j}`;
+    });
+    if (parts.length) run('ffmpeg', ['-v', 'error', '-y', '-i', raw, ...inputs, '-filter_complex', chain.replace(/;$/, ''), '-map', `[${last}]`, '-map', '0:a',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', ...loud, final], { timeout: 40 * 60000 });
+    else run('ffmpeg', ['-v', 'error', '-y', '-i', raw, '-c:v', 'copy', ...loud, final]);
+    // thumbnail: the opening cover at 1280 x 720, the size YouTube asks for
+    run('ffmpeg', ['-v', 'error', '-y', '-ss', '0.2', '-i', final, '-frames:v', '1', '-vf', 'scale=1280:720', '-q:v', '3', thumb]);
+  } else {
+    run('ffmpeg', ['-v', 'error', '-y', '-i', raw, '-c:v', 'copy', ...loud, final]);
+    // thumbnail: the cover frame at full size (YouTube and Facebook take it as the video's thumbnail)
+    const at = job.cover?.text ? 0.2 : Math.min(Math.max(1, (timing.beats[1]?.start || 3) - 0.4), timing.duration - 0.5);
+    run('ffmpeg', ['-v', 'error', '-y', '-ss', String(at), '-i', final, '-frames:v', '1', '-q:v', '3', thumb]);
+  }
   fs.rmSync(path.join(PROJECT, '.hypit', 'results'), { recursive: true, force: true });
-  return { final, thumb, duration: timing.duration };
+  return { final, thumb, duration: timing.duration, chapters: job.format === 'tutorial' ? timing.beats.map(b => Math.round(b.start)) : undefined };
 }
 
 async function main() {
@@ -166,11 +194,11 @@ async function main() {
         const tag = dayTag(job.publish_at);
         if (prev?.tag) for (const a of prev.a || []) await drop(a).catch(() => {});
         const a = [await put(tag, `${fk}.v`, sv), await put(tag, `${fk}.t`, stb)];
-        index.items[job.id] = { hash: job.hash, f: fk, tag, a, dur: r.duration, bytes: video.length, at: Date.now() };
+        index.items[job.id] = { hash: job.hash, f: fk, tag, a, dur: r.duration, ch: r.chapters, bytes: video.length, at: Date.now() };
       } else {
         fs.writeFileSync(path.join(OUT, `${fk}.v`), sv);
         fs.writeFileSync(path.join(OUT, `${fk}.t`), stb);
-        index.items[job.id] = { hash: job.hash, f: fk, dur: r.duration, bytes: video.length, at: Date.now() };
+        index.items[job.id] = { hash: job.hash, f: fk, dur: r.duration, ch: r.chapters, bytes: video.length, at: Date.now() };
       }
       made++;
       log(`rendered ${fk} in ${Math.round((Date.now() - t0) / 1000)}s`);

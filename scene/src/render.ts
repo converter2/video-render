@@ -7,13 +7,13 @@ import type { SpatialFrame } from "@hypit/spatial";
 import { assertTemporalWindowFor } from "@hypit/temporal";
 import type { TemporalInstant, TemporalWindow } from "@hypit/temporal";
 
-export type BeatKind = "hook" | "stat" | "bars" | "rank" | "columns" | "list" | "showcase" | "close";
+export type BeatKind = "hook" | "stat" | "bars" | "rank" | "columns" | "list" | "showcase" | "close" | "causes" | "screen" | "step";
 /** `cues` holds absolute frames, one per revealed element, in reveal order. */
 export type Beat = { id: string; kind: BeatKind; kicker: string; title: string; value: string; label: string; items: string;
   note: string; cues: string; variants: string; bubble: string; plate: string; tone: string; parts: string; image: string; at: TemporalInstant };
 /** `captions` is "startFrame~endFrame~text|..." on the film clock; `theme` is "bg1,bg2,highlight,mascotBody". */
 export type SceneOptions = { id: string; brand: string; source: string; transitionFrames: number; captions: string; theme: string; mascot: string;
-  coverText: string; coverNumber: string; coverFrames: number };
+  coverText: string; coverNumber: string; coverFrames: number; format?: string };
 
 const INK = "#14161C", WHITE = "#FFFFFF", CORAL = "#FF5A4E", GREEN = "#2FCB72", ROAD = "#30343F", GRASS = "#3FC26A";
 const MINI = ["#3D7BFF", "#FF9F1C", "#19C3B3", "#8B5CF6", "#FF5A4E", "#2FCB72"];
@@ -29,7 +29,7 @@ const parseItems = (raw: string): Item[] => raw.split("|").map(s => s.trim()).fi
 const frames = (raw: string) => raw.split(",").map(s => s.trim()).filter(Boolean).map(Number);
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
-type CarLook = { body: string; extras?: string; mood?: "happy" | "worried" | "shocked"; shine?: boolean };
+export type CarLook = { body: string; extras?: string; mood?: "happy" | "worried" | "shocked"; shine?: boolean };
 const twinkle = `<g class="twinkle"><path d="M70 40 l6 16 16 6 -16 6 -6 16 -6 -16 -16 -6 16 -6z" fill="#fff" stroke="${INK}" stroke-width="4"/>
   <path d="M380 40 l4 10 10 4 -10 4 -4 10 -4 -10 -10 -4 10 -4z" fill="#fff" stroke="${INK}" stroke-width="3"/></g>`;
 const eye = (x: number, y: number, rx: number, ry: number, px: number) => `<g transform="translate(${x} ${y})"><g class="eye">
@@ -37,7 +37,7 @@ const eye = (x: number, y: number, rx: number, ry: number, px: number) => `<g tr
   <circle cx="${px + 2}" cy="-1" r="${rx * 0.15}" fill="#fff"/></g></g>`;
 
 /** Mascot one: a side-on hatchback facing right with a face in its windscreen. */
-function car(look: CarLook): string {
+export function car(look: CarLook): string {
   const k = INK;
   const wheel = (x: number) => `<g transform="translate(${x} 190)"><g class="wh">
     <circle r="38" fill="#2A2D36" stroke="${k}" stroke-width="7"/><circle r="17" fill="#D5DCE6" stroke="${k}" stroke-width="5"/>
@@ -71,7 +71,7 @@ function car(look: CarLook): string {
 }
 
 /** Mascot two: a round friendly character for sites that are not about cars. Same viewBox and classes as the car. */
-function buddy(look: CarLook): string {
+export function buddy(look: CarLook): string {
   const k = INK, happy = look.mood === undefined || look.mood === "happy", shocked = look.mood === "shocked";
   return `<svg viewBox="0 0 420 250" class="car buddy" xmlns="http://www.w3.org/2000/svg">
     <ellipse cx="210" cy="234" rx="92" ry="10" fill="rgba(0,0,0,.22)"/>
@@ -321,7 +321,7 @@ export function renderScene(timeline: Timeline, within: SpatialFrame, window: Te
     html: `<div class="sky"></div>${clouds}${ground}
       <header><span class="mark">${brand}</span><span class="name">${brandName}</span></header>
       <nav>${beats.map(() => "<b><u></u></b>").join("")}</nav>
-      ${sections.map((s, i) => s.replace("<section", `<section data-i="${i}"`)).join("")}
+      ${sections.map((s, i) => (s ?? "").replace("<section", `<section data-i="${i}"`)).join("")}
       <div class="caps">${captions.map(c => c.html).join("")}</div>
       <footer>${source}</footer>${cover}`,
     css: `:scope{background:${th.bg1};overflow:hidden}

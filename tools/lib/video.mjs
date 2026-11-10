@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { readJson, writeJson, hash, seeded, log, zonedToUtc, localYmd, addDays, hhmmToMin, bannedHits, cleanText, clip } from './util.mjs';
 import { readSitemap, allowedPages } from './pages.mjs';
 import { openPage } from './capture.mjs';
+import { linesFrom } from '../script.mjs';
 
 const API = process.env.ANTHROPIC_URL || 'https://api.anthropic.com/v1/messages';
 const KINDS = ['hook', 'stat', 'bars', 'rank', 'columns', 'list', 'showcase', 'close'];
@@ -81,12 +82,12 @@ export function slotTimes(v = {}) {
   const lo = Math.min(a, b), span = Math.max(30, Math.abs(b - a));
   return Array.from({ length: n }, (_, i) => { const m = Math.round(lo + span * (i + 0.5) / n); return `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; });
 }
-function videoSlots(site, ymd) {
-  const times = slotTimes(site.video);
+function videoSlots(site, ymd, tut) {
+  const times = tut ? slotTimes({ per_day: Math.max(1, Math.min(3, Number(site.video.tutorials_per_day) || 1)), window_start: site.video.tutorial_start || '10:00', window_end: site.video.tutorial_end || '20:00' }) : slotTimes(site.video);
   const n = times.length;
   return times.map((t, i) => {
-    const jitter = Math.round((seeded(`vid${site.id}${ymd}${i}`) - 0.5) * (n > 4 ? 10 : 16));
-    return { key: `${ymd}#v${i}`, at: zonedToUtc(ymd, hhmmToMin(t) + jitter, site.timezone || 'UTC') };
+    const jitter = Math.round((seeded(`${tut ? 'tut' : 'vid'}${site.id}${ymd}${i}`) - 0.5) * (n > 4 ? 10 : 16));
+    return { key: `${ymd}#${tut ? 't' : 'v'}${i}`, at: zonedToUtc(ymd, hhmmToMin(t) + jitter, site.timezone || 'UTC') };
   });
 }
 
@@ -198,7 +199,7 @@ Hard limits (the site owner's rules, no exceptions):
 If the page cannot make a good, accurate video within these rules, set the title to "SKIP".${site.copy_rules ? '\n\nExtra rules from the site owner:\n' + site.copy_rules : ''}${site.video?.rules ? '\n\nVideo rules from the site owner:\n' + site.video.rules : ''}`;
 }
 
-async function callClaude(site, mascot, page, url, recentTitles, feedback) {
+async function callClaude(site, mascot, page, url, recentTitles, feedback, tut) {
   const key = String(process.env.ANTHROPIC_API_KEY || '').replace(/\s+/g, '');
   if (!key) throw new Error('ANTHROPIC_API_KEY is not set');
   const user = `Page URL: ${url}
@@ -212,16 +213,16 @@ ${page.tables ? '\nTables on the page:\n' + page.tables : ''}
 Recent video titles on this site (do not repeat their openings):
 ${recentTitles.slice(-12).map(t => '- ' + t).join('\n') || '- none yet'}
 
-Write the video and save it by calling the save_video tool.`;
+Write the ${tut ? 'tutorial' : 'video'} and save it by calling the ${tut ? 'save_tutorial' : 'save_video'} tool.`;
   const messages = [{ role: 'user', content: user }];
   if (feedback) { messages.push({ role: 'assistant', content: 'Understood.' }, { role: 'user', content: feedback }); }
-  const body = { model: site.copy_model || 'claude-sonnet-5-5', max_tokens: 6000, system: [{ type: 'text', text: systemPrompt(site, mascot), cache_control: { type: 'ephemeral' } }], tools: [TOOL], tool_choice: { type: 'auto' }, messages };
+  const body = { model: site.copy_model || 'claude-sonnet-5-5', max_tokens: tut ? 9000 : 6000, system: [{ type: 'text', text: tut ? tutorialPrompt(site) : systemPrompt(site, mascot), cache_control: { type: 'ephemeral' } }], tools: [tut ? TUT_TOOL : TOOL], tool_choice: { type: 'auto' }, messages };
   for (let attempt = 1; attempt <= 4; attempt++) {
     const res = await fetch(API, { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body), signal: AbortSignal.timeout(120000) });
     if (res.status === 429 || res.status >= 500) { await new Promise(r => setTimeout(r, 5000 * attempt)); continue; }
     const json = await res.json();
     if (!res.ok) throw new Error(`Claude API ${res.status}: ${json?.error?.message || JSON.stringify(json).slice(0, 300)}`);
-    const tool = (json.content || []).find(c => c.type === 'tool_use' && c.name === 'save_video');
+    const tool = (json.content || []).find(c => c.type === 'tool_use' && c.name === (tut ? 'save_tutorial' : 'save_video'));
     if (tool) return { plan: tool.input, usage: json.usage };
     const text = (json.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n');
     const m = text.match(/\{[\s\S]*\}/);
@@ -306,6 +307,98 @@ export function problems(plan, site, nums) {
   return out;
 }
 
+/* ---------- widescreen tutorials (YouTube videos and Facebook Page videos, 2.5 to 5 minutes) ---------- */
+const TUT_KINDS = ['hook', 'causes', 'screen', 'step', 'close'];
+const TUT_TOOL = {
+  name: 'save_tutorial',
+  description: 'Save the tutorial script.',
+  input_schema: { type: 'object', properties: {
+    title: { type: 'string', description: 'YouTube title, at most 90 characters, leading with what people type into search for this problem.' },
+    description: { type: 'string', description: 'YouTube description, 2 to 4 plain sentences about what the video covers. No links, no hashtags (both are added).' },
+    fb_caption: { type: 'string', description: 'Facebook caption, 1 or 2 sentences.' },
+    hashtags: { type: 'array', items: { type: 'string' }, description: 'Up to 3 hashtags without #.' },
+    cover_text: { type: 'string', description: 'Thumbnail words, 2 to 5 words, at most 26 characters: the problem as the viewer would say it.' },
+    cover_number: { type: 'string', description: 'Optional short badge, at most 9 characters, for example "7 FIXES".' },
+    beats: { type: 'array', items: { type: 'object', properties: {
+      kind: { type: 'string', enum: TUT_KINDS },
+      kicker: { type: 'string', description: 'Small label above the scene, 1 to 3 words.' },
+      title: { type: 'string', description: 'Scene heading, at most 34 characters.' },
+      label: { type: 'string', description: 'hook only: one short line under the title.' },
+      bubble: { type: 'string', description: 'hook only: a 1 to 2 word exclamation in a speech bubble.' },
+      value: { type: 'string', description: 'step only: the fix number, 1, 2, 3...' },
+      items: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' } }, required: ['label'] },
+        description: 'causes: 2 to 4 causes (label 1 to 3 words, value one short line). screen: 2 to 4 short how-to-test lines (label only). step: 1 to 3 short instruction lines (label, optional value). close: 2 to 4 recap points (label only). At most 44 characters each.' },
+      voice: { type: 'string', description: 'Everything the voice says while this scene is on screen, as natural spoken sentences. Mention the items in the order they are listed.' }
+    }, required: ['kind', 'title', 'voice'] } }
+  }, required: ['title', 'description', 'fb_caption', 'cover_text', 'beats'] }
+};
+
+function tutorialPrompt(site) {
+  return `You write complete tutorial videos for ${site.name} (${site.domain}): widescreen YouTube videos, 2.5 to 5 minutes long.
+About the site: ${site.about || ''}
+Audience: ${site.audience || 'general'}. Spelling: ${site.spelling || 'US English'}.
+Each video takes one page of the site and explains a problem the page helps with: what the problem looks like, why it happens,
+how to test it with the tool on that page, and how to fix it, step by step, easiest fix first. A calm, friendly voice reads it.
+
+Scenes, in this order:
+- hook (1): the problem in the viewer's own words, and what the video will cover.
+- causes (1): 2 to 4 causes, as the page lists them.
+- screen (exactly 1): how to test it on this page. The real page is shown being used while the voice explains it, so describe what to do and what the results mean, using the page's own words and figures.
+- step (3 to 8): one fix per scene, in the page's order. Number them 1, 2, 3 in "value". Say "Fix one", "Fix two"... at the start of each.
+- close (1): a short recap, ending with an invitation to test it free at ${site.domain}. The voice must end with "${sayDomain(site)}".
+
+How to write:
+- 380 to 750 spoken words in total. Short, clear sentences, like a helpful person talking. Plain words.
+- Use only causes, fixes, steps and figures that are on the page. Never invent, estimate or add advice the page does not give.
+- Write numbers as digits in the voice text. Write units in full ("milliseconds", not "ms").
+- The thumbnail (cover_text) states the problem as people search for it. It must be true to the page. No fake shock, no "you won't believe", no emojis.
+- The title is unique to this page and leads with the search phrase. Do not reuse the openings of the recent titles listed.
+- Avoid stock phrases such as "look no further", "unlock", "dive into", "game-changer", "must-have", "the ultimate". Never use em dashes.
+- Never say or hint that anything is automated, generated, AI-made or updated on a schedule.
+
+Hard limits (the site owner's rules, no exceptions):
+- Nothing about alcohol in any form, gambling, betting or lotteries, or anything adult or suggestive.
+- Nothing that presents worship of, prayer to, or offerings to gods, idols or deities.
+- Never show a person's name or anything that could identify a private person.
+If the page has no problem and fixes to explain, or cannot make a good, accurate tutorial within these rules, set the title to "SKIP".${site.copy_rules ? '\n\nExtra rules from the site owner:\n' + site.copy_rules : ''}${site.video?.rules ? '\n\nVideo rules from the site owner:\n' + site.video.rules : ''}`;
+}
+
+export function tidyTutorial(plan, site) {
+  const dom = site.domain.replace(/^www\./, '');
+  const spoken = sayDomain(site);
+  const beats = (plan.beats || []).filter(b => TUT_KINDS.includes(b?.kind)).slice(0, 12).map((b, i) => {
+    const items = (Array.isArray(b.items) ? b.items : []).map(it => ({ label: clip(it?.label, 48), value: clip(it?.value || '', 60) })).filter(it => it.label).slice(0, 4);
+    const voice = cleanText(b.voice || '');
+    const lines = linesFrom(voice).map(l => l.map(g => ({ show: g.show, say: g.say.split(dom).join(spoken).replace(/\bms\b/g, 'milliseconds') })));
+    return { kind: b.kind, kicker: clip(b.kicker, 26), title: clip(b.title, 40), label: clip(b.label, 70), bubble: clip(b.bubble, 14),
+      value: b.kind === 'step' ? String(b.value || '').replace(/\D/g, '').slice(0, 2) : '', note: b.kind === 'screen' ? clip(dom + new URL(plan._url).pathname.replace(/\/$/, ''), 60) : '', items, lines };
+  }).filter(b => b.lines.length);
+  let n = 0; for (const b of beats) if (b.kind === 'step') b.value = String(++n);
+  return {
+    title: clip(plan.title, 95).replace(/[<>]/g, ''), description: clip(plan.description, 700).replace(/[<>]/g, ''), fb_caption: clip(plan.fb_caption, 260),
+    hashtags: (Array.isArray(plan.hashtags) ? plan.hashtags : String(plan.hashtags || '').split(/[\s,]+/)).map(t => String(t).replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean).slice(0, 3),
+    cover_text: clip(String(plan.cover_text || '').replace(/[!]+$/, ''), 30), cover_number: clip(plan.cover_number || '', 9), source: '', beats
+  };
+}
+
+export function tutorialProblems(plan, site, nums) {
+  const out = [], b = plan.beats, count = k => b.filter(x => x.kind === k).length;
+  if (b[0]?.kind !== 'hook') out.push('the first scene must be "hook"');
+  if (b.at(-1)?.kind !== 'close') out.push('the last scene must be "close"');
+  if (count('causes') !== 1) out.push('use exactly one "causes" scene');
+  if (count('screen') !== 1) out.push('use exactly one "screen" scene');
+  if (count('step') < 3 || count('step') > 8) out.push('use 3 to 8 "step" scenes');
+  const words = b.flatMap(x => x.lines.flat().map(g => g.show)).join(' ').split(/\s+/).filter(Boolean).length;
+  if (words < 320 || words > 820) out.push(`the voice has ${words} words; aim for 380 to 750`);
+  const cw = String(plan.cover_text || '').split(/\s+/).filter(Boolean).length;
+  if (!plan.cover_text || cw > 6 || plan.cover_text.length > 28) out.push('cover_text must be 2 to 5 words and at most 26 characters');
+  const bad = unsupported(plan, nums, site.domain);
+  if (bad.length) out.push(`these numbers are not on the page: ${bad.slice(0, 8).join(', ')}. Use only figures the page shows`);
+  const hits = bannedHits([plan.title, plan.description, plan.fb_caption, plan.cover_text, ...plan.hashtags, ...b.flatMap(x => [x.title, x.kicker, x.label, ...x.items.map(i => i.label + ' ' + i.value), ...x.lines.flat().map(g => g.show)])].join('\n'));
+  if (hits.length) out.push(`remove these words the site owner does not allow: ${[...new Set(hits)].join(', ')}`);
+  return out;
+}
+
 /* ---------- planning (runs inside the daily job) ---------- */
 export function openVideos(S) {
   S.videos = readJson(path.join(S.dataDir, 'videos.json'), []);
@@ -313,9 +406,10 @@ export function openVideos(S) {
   return S;
 }
 
-export async function planVideos(browser, S, usageTotals, apiState, timeLeft, brand, { now: makeNow = false } = {}) {
+export async function planVideos(browser, S, usageTotals, apiState, timeLeft, brand, { now: makeNow = false, tutorial: tut = false } = {}) {
   const { site, report } = S;
   if (!videoOn(site) || apiState.down) return;
+  if (tut && !(Number(site.video.tutorials_per_day) > 0)) return;
   const now = Date.now();
   const tz = site.timezone || 'UTC';
   const today = localYmd(new Date(), tz);
@@ -324,9 +418,9 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
   const used = new Set(S.videos.map(v => v.slot));
   // "Make a video now": one extra video for today, 90 minutes out, outside the normal schedule (you can post it sooner from the dashboard)
   const open = makeNow ? [{ key: `${today}#now${Date.now().toString(36)}`, at: new Date(Math.ceil((now + 90 * 60000) / 300000) * 300000) }]
-    : Array.from({ length: days + 1 }, (_, i) => addDays(today, i)).flatMap(d => videoSlots(site, d))
+    : Array.from({ length: days + 1 }, (_, i) => addDays(today, i)).flatMap(d => videoSlots(site, d, tut))
       .filter(s => s.at.getTime() > now + 6 * 3600000 && s.at.getTime() < now + (days + 0.5) * 86400000 && !used.has(s.key));
-  if (!open.length) { report.note = report.note || `videos are already planned for the next ${days} days`; return; }
+  if (!open.length) { if (!tut) report.note = report.note || `videos are already planned for the next ${days} days`; return; }
   // which pages may get videos: the website's own list if it has one, otherwise any page the posts may use
   const host = site.domain.replace(/^www\./, '').toLowerCase();
   const toRe = r => { try { return new RegExp(r, 'i'); } catch { return null; } };
@@ -352,10 +446,11 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
     return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb) || seeded(a + today) - seeded(b + today);
   });
   const repeatDays = Math.max(30, Math.min(365, Number(site.video.repeat_days) || REPEAT_DAYS));
-  const recent = new Set(S.videos.filter(v => Date.parse(v.publish_at) > now - repeatDays * 86400000).map(v => v.url));
+  const hk = u => tut ? 't:' + u : u;   // tutorials and Shorts of the same page do not hold each other back
+  const recent = new Set(S.videos.filter(v => (v.format === 'tutorial') === tut && Date.parse(v.publish_at) > now - repeatDays * 86400000).map(v => v.url));
   // pages typed in by hand come first, in the order they were listed
   const allowed = [...new Set([...exact, ...urls])].filter(u => !never.some(r => r.test(pathOf(u)) || r.test(u)));
-  const pool = allowed.filter(u => !recent.has(u) && !(S.videoHistory[u]?.skip_until > now) && !(Date.parse(S.videoHistory[u]?.last || 0) > now - repeatDays * 86400000));
+  const pool = allowed.filter(u => !recent.has(u) && !(S.videoHistory[hk(u)]?.skip_until > now) && !(Date.parse(S.videoHistory[hk(u)]?.last || 0) > now - repeatDays * 86400000));
   if (!pool.length) {
     report.errors.push(!allowed.length
       ? (listed ? 'videos: no page matches the video page list (check the links and patterns in the website settings)' : 'videos: no pages can get a video (check "Never make videos from")')
@@ -364,8 +459,9 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
   }
   const mascot = defaultMascot(site);
   const theme = videoTheme(site, brand);
-  const recentTitles = S.videos.slice(-20).map(v => v.title);
-  report.videos_planned = 0;
+  const recentTitles = S.videos.filter(v => (v.format === 'tutorial') === tut).slice(-20).map(v => v.title);
+  if (!tut) report.videos_planned = 0;
+  report.tutorials_planned = report.tutorials_planned || 0;
   // up to 4 scripts are written at the same time, so 10 a day costs little run time (GitHub minutes)
   const queue = [...open];
   const worker = async () => {
@@ -380,18 +476,19 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
       const nums = pageNumbers(page);
       let plan, usage = { input_tokens: 0, output_tokens: 0 };
       try {
-        let r = await callClaude(site, mascot, page, url, recentTitles);
+        let r = await callClaude(site, mascot, page, url, recentTitles, '', tut);
         usage = r.usage || usage;
-        if (/^skip$/i.test(String(r.plan?.title || '').trim())) { S.videoHistory[url] = { ...(S.videoHistory[url] || {}), skip_until: now + 90 * 86400000 }; continue; }
-        plan = tidy(r.plan, site, mascot);
-        let issues = problems(plan, site, nums);
+        if (/^skip$/i.test(String(r.plan?.title || '').trim())) { S.videoHistory[hk(url)] = { ...(S.videoHistory[hk(url)] || {}), skip_until: now + 90 * 86400000 }; continue; }
+        const shape = p => tut ? tidyTutorial({ ...p, _url: url }, site) : tidy(p, site, mascot), check = p => tut ? tutorialProblems(p, site, nums) : problems(p, site, nums);
+        plan = shape(r.plan);
+        let issues = check(plan);
         if (issues.length) {
           log('rewriting a video script (it broke a rule or used a figure not on the page)');
-          r = await callClaude(site, mascot, page, url, recentTitles, `Please fix these and call save_video again: ${issues.join('; ')}.`);
+          r = await callClaude(site, mascot, page, url, recentTitles, `Please fix these and call ${tut ? 'save_tutorial' : 'save_video'} again: ${issues.join('; ')}.`, tut);
           usage = { input_tokens: usage.input_tokens + (r.usage?.input_tokens || 0), output_tokens: usage.output_tokens + (r.usage?.output_tokens || 0) };
-          plan = tidy(r.plan, site, mascot);
-          issues = problems(plan, site, nums);
-          if (issues.length) { report.errors.push(`video skipped for ${new URL(url).pathname}: ${issues[0]}`); S.videoHistory[url] = { ...(S.videoHistory[url] || {}), skip_until: now + 30 * 86400000 }; continue; }
+          plan = shape(r.plan);
+          issues = check(plan);
+          if (issues.length) { report.errors.push(`${tut ? 'tutorial' : 'video'} skipped for ${new URL(url).pathname}: ${issues[0]}`); S.videoHistory[hk(url)] = { ...(S.videoHistory[hk(url)] || {}), skip_until: now + 30 * 86400000 }; continue; }
         }
       } catch (e) {
         apiState.fails++;
@@ -404,16 +501,16 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
       usageTotals.usd += ((usage.input_tokens || 0) * pr[0] + (usage.output_tokens || 0) * pr[1]) / 1e6;
       const cost = { input: usage.input_tokens || 0, output: usage.output_tokens || 0, usd: Math.round(((usage.input_tokens || 0) * pr[0] + (usage.output_tokens || 0) * pr[1]) / 1e3) / 1e3 };
       const item = {
-        id: `${slot.at.toISOString().slice(0, 10).replace(/-/g, '')}-v${hash(url + Date.now() + Math.random(), 7)}`,
+        id: `${slot.at.toISOString().slice(0, 10).replace(/-/g, '')}-${tut ? 't' : 'v'}${hash(url + Date.now() + Math.random(), 7)}`, ...(tut ? { format: 'tutorial' } : {}),
         slot: slot.key, url, publish_at: slot.at.toISOString(), created: new Date().toISOString(),
         title: plan.title, description: plan.description, fb_caption: plan.fb_caption, hashtags: plan.hashtags,
         source: plan.source, cover: { text: plan.cover_text, number: plan.cover_number }, mascot, theme, voice: defaultVoice(site), beats: plan.beats, cost
       };
-      item.hash = hash(JSON.stringify([item.beats, item.theme, item.mascot, item.voice, site.domain, item.source, item.cover]), 12);
+      item.hash = hash(JSON.stringify([item.beats, item.theme, item.mascot, item.voice, site.domain, item.source, item.cover, item.format || '']), 12);
       S.videos.push(item);
       recentTitles.push(item.title);
-      S.videoHistory[url] = { last: item.publish_at };
-      report.videos_planned++;
+      S.videoHistory[hk(url)] = { last: item.publish_at };
+      if (tut) report.tutorials_planned++; else report.videos_planned++;
       made = true;
     }
   }

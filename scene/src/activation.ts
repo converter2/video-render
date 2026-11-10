@@ -19,6 +19,7 @@ import { resolveTemporalInstantReference, resolveTemporalWindowReference, resolv
   temporalContextAttributeVocabulary, temporalInstantAttributeNames, temporalInstantAttributeVocabulary,
   temporalWindowAttributeNames, temporalWindowAttributeVocabulary } from "@hypit/temporal/markup";
 import { renderScene } from "./render.js";
+import { renderTutorial } from "./tutorial.js";
 import type { SceneOptions, Beat } from "./render.js";
 
 const module = { name: "@autoposter/scene", version: "1" } as const;
@@ -49,13 +50,13 @@ const component: ProducerPackage & AdmissionPackage = { producers: [
     if (messages.some(item => item.id === message.id) || (messages.at(-1)?.at.frame ?? -1) > at.frame) throw new Error("MOT beats need unique ids and chronological times.");
     return { outputs: { messages: value([...messages, { ...message, at }]) }, needs: {} };
   } },
-  { producer: producers.render, handler: ({ inputs }) => ({ outputs: { visual: value(renderScene(inline<Timeline>(inputs.timeline),
+  { producer: producers.render, handler: ({ inputs }) => ({ outputs: { visual: value((inline<SceneOptions>(inputs.options).format === "tutorial" ? renderTutorial : renderScene)(inline<Timeline>(inputs.timeline),
     inline<SpatialFrame>(inputs.within), inline<TemporalWindow>(inputs.window), inline<FontStackRef>(inputs.font), inline<FontStackRef>(inputs.display),
     inline<Beat[]>(inputs.messages), inline<SceneOptions>(inputs.options))) }, needs: {} }) },
 ] };
 
 export const decodeSurface: StructuredSurfaceHandler = ({ element, resolveReference }) => {
-  assertAttributes(element, ["id", "timeline", "within", "font", "display", "brand", "source", "captions", "theme", "mascot", "cover-text", "cover-number", "cover-frames", "transition-frames", ...temporalWindowAttributeNames]);
+  assertAttributes(element, ["id", "timeline", "within", "font", "display", "brand", "source", "captions", "theme", "mascot", "cover-text", "cover-number", "cover-frames", "transition-frames", "format", ...temporalWindowAttributeNames]);
   const id = textAttribute(element, "id"), context = resolveTemporalContext({ element, resolveReference });
   const window = resolveTemporalWindowReference({ element, resolveReference });
   const reference = (name: string, type: TypeRef): SurfaceResolvedReference => {
@@ -71,7 +72,8 @@ export const decodeSurface: StructuredSurfaceHandler = ({ element, resolveRefere
     mascot: element.attributes["mascot"] === undefined ? "car" : textAttribute(element, "mascot"),
     coverText: element.attributes["cover-text"] === undefined ? "" : textAttribute(element, "cover-text"),
     coverNumber: element.attributes["cover-number"] === undefined ? "" : textAttribute(element, "cover-number"),
-    coverFrames: Number(element.attributes["cover-frames"] ?? "0") };
+    coverFrames: Number(element.attributes["cover-frames"] ?? "0"),
+    format: element.attributes["format"] === undefined ? "" : textAttribute(element, "format") };
   const records = [{ id: `${id}.options`, type: types.Options, value: value(options), range: element.range }];
   const inputs = [{ name: "timeline", type: timelineTypes.timeline }, { name: "within", type: spatialTypes.frame },
     { name: "font", type: mediaTypes.fontStack }, { name: "display", type: mediaTypes.fontStack }, { name: "window", type: temporalTypes.window }, { name: "options", type: types.Options }];
@@ -87,7 +89,7 @@ export const decodeSurface: StructuredSurfaceHandler = ({ element, resolveRefere
     const fields = ["kicker", "title", "value", "label", "items", "note", "cues", "variants", "bubble", "plate", "tone", "parts", "image"] as const;
     assertAttributes(child, ["id", "kind", ...fields, ...temporalInstantAttributeNames]); assertEmptyElement(child);
     const messageId = textAttribute(child, "id"), kind = textAttribute(child, "kind");
-    if (!["hook", "stat", "bars", "rank", "columns", "list", "showcase", "close"].includes(kind)) throw new Error(`Beat kind ${kind} is not known.`);
+    if (!["hook", "stat", "bars", "rank", "columns", "list", "showcase", "close", "causes", "screen", "step"].includes(kind)) throw new Error(`Beat kind ${kind} is not known.`);
     const opt = (name: string) => { const raw = child.attributes[name]; return raw === undefined ? "" : textAttribute(child, name); };
     const at = resolveTemporalInstantReference({ element: child, resolveReference });
     const key = `message-${++index}`;
@@ -114,6 +116,7 @@ const declaration = { name: "scene", tag: "Scene", mode: "structured" as const,
     { name: "captions", kind: "literal" as const, required: false, summary: "startFrame~endFrame~text groups separated by |." },
     { name: "theme", kind: "literal" as const, required: false, summary: "bg1,bg2,highlight,mascotBody colours." },
     { name: "mascot", kind: "literal" as const, required: false, summary: "car or buddy." },
+    { name: "format", kind: "literal" as const, required: false, summary: "tutorial for the widescreen tutorial layout." },
     ...["cover-text", "cover-number", "cover-frames"].map(name => ({ name, kind: "literal" as const, required: false, summary: "Opening cover (thumbnail) settings." })),
   ], children: [{ tag: "Beat", cardinality: "many" as const, summary: "One full-frame state: hook, stat, bars, rank, columns, list, showcase or close.", attributes: [
     ...["id", "kind"].map(name => ({ name, kind: "literal" as const, required: true, summary: name })),

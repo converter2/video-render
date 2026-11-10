@@ -56,6 +56,7 @@ async function main() {
       try {
         for (let n = 0; n < Math.min(3, x.now || 0); n++) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand, { now: true });
         if (x.fill !== false) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand);
+        if (x.fill !== false) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand, { tutorial: true });
       } catch (e) { S.report.errors.push('video: ' + e.message); }
       const fresh = S.videos.filter(v => !before.has(v.id));
       for (const item of fresh) plans.items.push({ site: x.site.id, item });
@@ -81,7 +82,7 @@ async function main() {
       if (skips.has(v.id) || Date.parse(v.publish_at) < now - 3600000 || !v.beats?.length) continue;
       jobs.push({ id: v.id, site: x.site.id, hash: v.hash, publish_at: v.publish_at, url: v.url, domain: x.site.domain.replace(/^www\./, ''),
         source: v.source, cover: v.cover, mascot: v.mascot, theme: v.theme, voice: v.voice,
-        speed: Number(x.site.video?.speed) || (String(v.voice).startsWith('b') ? 1.08 : 1.06), beats: v.beats });
+        speed: Number(x.site.video?.speed) || (String(v.voice).startsWith('b') ? 1.08 : 1.06), beats: v.beats, ...(v.format ? { format: v.format } : {}) });
     }
   }
   fs.writeFileSync(opt('jobs'), JSON.stringify({ made: new Date().toISOString(), jobs }));
