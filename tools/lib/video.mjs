@@ -245,7 +245,7 @@ export function unsupported(plan, nums, domain = '') {
   const dom = String(domain).replace(/^www\./, '').toLowerCase();
   const add = s => { if (s) shown.push(...(String(s).toLowerCase().split(dom).join(' ').match(NUM) || [])); };
   add(plan.title); add(plan.description); add(plan.fb_caption); add(plan.cover_text); add(plan.cover_number);
-  for (const b of plan.beats || []) {
+  for (const b of asList(plan.beats)) {
     add(b.title); add(b.kicker); add(b.value); add(b.label); add(b.bubble); add(b.plate);
     for (const it of b.items || []) { add(it.label); add(it.value); }
     for (const l of b.lines || []) for (const g of l) add(g.show);
@@ -259,8 +259,8 @@ export function unsupported(plan, nums, domain = '') {
 
 function tidy(plan, site, mascot) {
   const g = x => ({ show: clip(x?.show, 26), say: cleanText(x?.say || x?.show || '') });
-  const beats = (plan.beats || []).filter(b => KINDS.includes(b?.kind)).slice(0, 7).map(b => {
-    const items = (Array.isArray(b.items) ? b.items : []).map(it => ({
+  const beats = asList(plan.beats).filter(b => KINDS.includes(b?.kind)).slice(0, 7).map(b => {
+    const items = asList(b.items).map(it => ({
       label: clip(it?.label, b.kind === 'columns' ? 5 : b.kind === 'bars' ? 13 : 28), value: clip(it?.value || '', 9),
       ...(mascot === 'car' && b.kind === 'rank' && CAR_PARTS.includes(it?.part) ? { part: it.part } : {}),
       ...(mascot === 'car' && b.kind === 'bars' && CAR_LOOKS.includes(it?.variant) ? { variant: it.variant } : {})
@@ -268,7 +268,7 @@ function tidy(plan, site, mascot) {
     return {
       kind: b.kind, kicker: clip(b.kicker, 28), title: clip(b.title, 40), value: clip(b.value, 9), label: clip(b.label, 26),
       tone: b.tone === 'bad' ? 'bad' : 'good', bubble: clip(b.bubble, 9), plate: clip(b.plate, 16), items,
-      lines: (Array.isArray(b.lines) ? b.lines : []).map(l => (Array.isArray(l) ? l : [l]).map(g).filter(x => x.show && x.say)).filter(l => l.length)
+      lines: asList(b.lines).map(l => (Array.isArray(l) ? l : [l]).map(g).filter(x => x.show && x.say)).filter(l => l.length)
     };
   }).filter(b => b.lines.length);
   return {
@@ -305,6 +305,14 @@ export function problems(plan, site, nums) {
   const hits = bannedHits([plan.title, plan.description, plan.fb_caption, plan.cover_text, ...plan.hashtags, ...b.flatMap(x => [x.title, x.kicker, x.label, ...x.items.map(i => i.label), ...x.lines.flat().map(g => g.show + ' ' + g.say)])].join('\n'));
   if (hits.length) out.push(`remove these words the site owner does not allow: ${[...new Set(hits)].join(', ')}`);
   return out;
+}
+
+/** Claude sometimes returns a list as JSON text, or as an object of numbered entries: accept all of them. */
+function asList(x) {
+  if (Array.isArray(x)) return x;
+  if (typeof x === 'string') { const t = x.trim(); if (/^[\[{]/.test(t)) { try { return asList(JSON.parse(t)); } catch { return []; } } return []; }
+  if (x && typeof x === 'object') { const v = Object.values(x); return v.length === 1 && Array.isArray(v[0]) ? v[0] : v.filter(e => e && typeof e === 'object'); }
+  return [];
 }
 
 /* ---------- widescreen tutorials (YouTube videos and Facebook Page videos, 2.5 to 5 minutes) ---------- */
@@ -366,8 +374,8 @@ If the page has no problem and fixes to explain, or cannot make a good, accurate
 export function tidyTutorial(plan, site) {
   const dom = site.domain.replace(/^www\./, '');
   const spoken = sayDomain(site);
-  const beats = (plan.beats || []).filter(b => TUT_KINDS.includes(b?.kind)).slice(0, 12).map((b, i) => {
-    const items = (Array.isArray(b.items) ? b.items : []).map(it => ({ label: clip(it?.label, 48), value: clip(it?.value || '', 60) })).filter(it => it.label).slice(0, 4);
+  const beats = asList(plan.beats).filter(b => TUT_KINDS.includes(b?.kind)).slice(0, 12).map((b, i) => {
+    const items = asList(b.items).map(it => typeof it === 'string' ? { label: it } : it).map(it => ({ label: clip(it?.label, 48), value: clip(it?.value || '', 60) })).filter(it => it.label).slice(0, 4);
     const voice = cleanText(b.voice || '');
     const lines = linesFrom(voice).map(l => l.map(g => ({ show: g.show, say: g.say.split(dom).join(spoken).replace(/\bms\b/g, 'milliseconds') })));
     return { kind: b.kind, kicker: clip(b.kicker, 26), title: clip(b.title, 40), label: clip(b.label, 70), bubble: clip(b.bubble, 14),
@@ -491,6 +499,8 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
           if (issues.length) { report.errors.push(`${tut ? 'tutorial' : 'video'} skipped for ${new URL(url).pathname}: ${issues[0]}`); S.videoHistory[hk(url)] = { ...(S.videoHistory[hk(url)] || {}), skip_until: now + 30 * 86400000 }; continue; }
         }
       } catch (e) {
+        // a fault in reading Claude's answer is not a problem with the key: skip this page and carry on
+        if (e instanceof TypeError || e instanceof SyntaxError || e instanceof RangeError) { report.errors.push(`${tut ? 'tutorial' : 'video'} script for ${new URL(url).pathname} could not be read (${e.message}); trying other pages`); continue; }
         apiState.fails++;
         if (/credit|billing|balance|quota|api key|authentication|401|403|not set/i.test(e.message) || apiState.fails >= 2) { apiState.down = true; apiState.reason = report.api_problem = e.message.slice(0, 200); }
         else report.errors.push('video script: ' + e.message);
