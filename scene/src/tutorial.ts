@@ -27,9 +27,12 @@ export function renderTutorial(timeline: Timeline, within: SpatialFrame, window:
   assertTemporalWindowFor(window, { subjectId: options.id, timeline });
   const start = window.span.startFrame, end = window.span.endFrameExclusive;
   const [bg1 = "#16324F", bg2 = "#2A6F97", hi = "#FFC93C", mbody = "#FFC93C"] = options.theme.split(",").map(s => s.trim()).filter(Boolean);
+  // "clean": the website's own look (plain type, dark panels, no character); otherwise the cartoon look
+  const clean = options.format === "tutorial-clean";
+  const CARD = clean ? WHITE : INK, CARD2 = clean ? "#B9BFC9" : "#3B4250";
   let order = 0;
   const texts: VisualElement[] = [];
-  const OL = `0 5px 0 ${INK}, 3px 3px 0 ${INK}, -3px 3px 0 ${INK}, 3px -3px 0 ${INK}, -3px -3px 0 ${INK}`;
+  const OL = clean ? "0 4px 22px rgba(0,0,0,.55)" : `0 5px 0 ${INK}, 3px 3px 0 ${INK}, -3px 3px 0 ${INK}, 3px -3px 0 ${INK}, -3px -3px 0 ${INK}`;
   const t = (id: string, value: string, size: number, color: string, face: FontStackRef, extra: { name: string; value: string | number }[] = []) => {
     const style = new Map<string, { name: string; value: string | number }>();
     for (const d of [{ name: "font-size", value: `${size}px` }, { name: "line-height", value: 1.12 }, { name: "color", value: color }, ...extra]) style.set(d.name, d);
@@ -40,7 +43,8 @@ export function renderTutorial(timeline: Timeline, within: SpatialFrame, window:
   const outlined = [{ name: "text-shadow", value: OL }];
   const up = [{ name: "text-transform", value: "uppercase" }, { name: "letter-spacing", value: "0.07em" }];
   const pill = (k: string, text: string, d = 0) => text ? `<div class="kicker a" data-d="${d}">${t(`${k}-kicker`, text, 28, INK, body, up)}</div>` : "";
-  const mascot = (mood: "happy" | "worried" | "shocked", cls = "") => `<div class="mascot ${cls}">${buddy({ body: mbody, mood })}</div>`;
+  const ring = (glyph: string, cls: string) => `<div class="ring ${cls}"><svg viewBox="0 0 200 200"><circle cx="100" cy="100" r="84" fill="none" stroke="${glyph === "?" ? hi : mbody}" stroke-width="14" stroke-linecap="round" stroke-dasharray="420 120" transform="rotate(-60 100 100)"/>${glyph === "?" ? `<path d="M76 80 a24 24 0 1 1 34 22 c-7 4 -10 8 -10 16 v6" fill="none" stroke="${hi}" stroke-width="15" stroke-linecap="round"/><circle cx="100" cy="146" r="9" fill="${hi}"/>` : `<path d="M62 102 L90 130 L140 76" fill="none" stroke="${mbody}" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>`}</svg></div>`;
+  const mascot = (mood: "happy" | "worried" | "shocked", cls = "") => clean ? (mood === "worried" && cls.includes("big") ? ring("?", cls) : cls.includes("wave") ? ring("ok", cls) : "") : `<div class="mascot ${cls}">${buddy({ body: mbody, mood })}</div>`;
   const coverLead = options.coverFrames > 0 && options.coverText ? options.coverFrames : 0;
   const tick = `<svg viewBox="0 0 40 40"><path d="M10 21L17 28L30 13" stroke="#fff" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   const wrench = `<svg viewBox="0 0 120 120" class="tool"><path d="M78 14a26 26 0 0 0-30 34L14 82a10 10 0 0 0 14 14l34-34a26 26 0 0 0 34-30l-16 16-14-4-4-14z" fill="#E8ECF2" stroke="${INK}" stroke-width="7" stroke-linejoin="round"/></svg>`;
@@ -61,7 +65,7 @@ export function renderTutorial(timeline: Timeline, within: SpatialFrame, window:
         <div class="stitle a" data-d="3">${t(`${k}-title`, beat.title, fit(beat.title, 76, 32), WHITE, display, outlined)}</div>
         <div class="grid g${Math.min(items.length, 4) > 2 ? 4 : 2}">${items.slice(0, 4).map((it, j) => `<div class="card a pp" data-d="${cue(j, 12 + j * 20)}">
           <span class="num">${t(`${k}-n${j}`, String(j + 1), 40, INK, display)}</span>
-          <div class="ct">${t(`${k}-l${j}`, it.label, fit(it.label, 40, 26), INK, display)}${it.value ? `<div class="cv">${t(`${k}-v${j}`, it.value, fit(it.value, 28, 60), "#3B4250", body)}</div>` : ""}</div></div>`).join("")}</div>
+          <div class="ct">${t(`${k}-l${j}`, it.label, fit(it.label, 40, 26), CARD, display)}${it.value ? `<div class="cv">${t(`${k}-v${j}`, it.value, fit(it.value, 28, 60), CARD2, body)}</div>` : ""}</div></div>`).join("")}</div>
         ${mascot("worried", "side a")}
       </section>`;
       case "screen": return `<section>${pill(k, beat.kicker || "Check it")}
@@ -72,7 +76,7 @@ export function renderTutorial(timeline: Timeline, within: SpatialFrame, window:
         </div>
       </section>`;
       case "step": return `<section>${pill(k, beat.kicker || "Fix")}
-        <div class="badge a pp" data-d="2">${t(`${k}-fixw`, "FIX", 34, INK, display)}${t(`${k}-fixn`, beat.value || String(i), 110, INK, display)}</div>
+        <div class="badge a pp" data-d="2">${t(`${k}-fixw`, "FIX", 34, clean ? hi : INK, display)}${t(`${k}-fixn`, beat.value || String(i), 110, clean ? WHITE : INK, display)}</div>
         <div class="steptitle a" data-d="8">${t(`${k}-title`, beat.title, fit(beat.title, 80, 24), WHITE, display, outlined)}</div>
         <div class="lines">${items.slice(0, 3).map((it, j) => `<div class="line a" data-d="${cue(j, 24 + j * 30)}"><span class="arrow">&#10148;</span><div>${t(`${k}-s${j}`, it.label, fit(it.label, 38, 44), WHITE, body)}${it.value ? `<div class="lv">${t(`${k}-sv${j}`, it.value, 28, "#C9D3E2", body)}</div>` : ""}</div></div>`).join("")}</div>
         <div class="fixer a pp" data-d="10">${mascot("happy", "side")}${wrench}</div>
@@ -98,9 +102,9 @@ export function renderTutorial(timeline: Timeline, within: SpatialFrame, window:
     return `M1400 560 L${(1400 + Math.cos(a0) * 2400).toFixed(0)} ${(560 + Math.sin(a0) * 2400).toFixed(0)} L${(1400 + Math.cos(a1) * 2400).toFixed(0)} ${(560 + Math.sin(a1) * 2400).toFixed(0)}Z`; }).join(" ");
   const cover = coverOn ? `<div class="cover"><svg class="rays" viewBox="0 0 1920 1080"><path d="${rays}" fill="rgba(255,255,255,.08)"/></svg>
       <div class="cbrand"><span class="mark">${t("cv-mark", options.brand.charAt(0).toUpperCase(), 34, INK, display)}</span>${t("cv-name", options.brand.replace(/\.[a-z.]+$/i, ""), 38, WHITE, display, outlined)}</div>
-      <div class="ctext">${t("cv-text", cText, cText.length <= 14 ? 170 : cText.length <= 22 ? 140 : 118, hi, display, [{ name: "line-height", value: 1.0 }, { name: "text-shadow", value: `0 9px 0 ${INK}, 5px 5px 0 ${INK}, -5px 5px 0 ${INK}, 5px -5px 0 ${INK}, -5px -5px 0 ${INK}` }])}</div>
-      ${options.coverNumber ? `<div class="cnum">${t("cv-num", options.coverNumber, fit(options.coverNumber, 64, 10), INK, display)}</div>` : ""}
-      <div class="cmascot">${buddy({ body: mbody, mood: "shocked" })}</div>
+      <div class="ctext">${t("cv-text", cText, cText.length <= 14 ? 170 : cText.length <= 22 ? 140 : 118, clean ? WHITE : hi, display, [{ name: "line-height", value: clean ? 0.95 : 1.0 }, { name: "text-shadow", value: clean ? "0 6px 30px rgba(0,0,0,.6)" : `0 9px 0 ${INK}, 5px 5px 0 ${INK}, -5px 5px 0 ${INK}, 5px -5px 0 ${INK}, -5px -5px 0 ${INK}` }])}</div>
+      ${options.coverNumber ? `<div class="cnum">${t("cv-num", options.coverNumber, fit(options.coverNumber, 64, 10), clean ? WHITE : INK, display)}</div>` : ""}
+      ${clean ? ring("?", "cring") : `<div class="cmascot">${buddy({ body: mbody, mood: "shocked" })}</div>`}
       <div class="cq">${t("cv-q", "?", 230, WHITE, display, outlined)}</div></div>` : "";
   const coverFrames = coverOn ? options.coverFrames : 0;
   const program = htmlVisual({
@@ -164,7 +168,26 @@ export function renderTutorial(timeline: Timeline, within: SpatialFrame, window:
       .cnum{position:absolute;left:96px;top:860px;background:#fff;border:7px solid ${INK};border-radius:18px;padding:16px 32px 10px;box-shadow:0 8px 0 ${INK};transform:rotate(-2deg)}
       .cmascot{position:absolute;left:1190px;top:260px;width:680px}
       .cmascot .car{width:100%;display:block;overflow:visible}
-      .cq{position:absolute;left:1700px;top:120px;transform:rotate(14deg)}`,
+      .cq{position:absolute;left:1700px;top:120px;transform:rotate(14deg)}
+      .ring{position:absolute}.ring svg{width:100%;height:100%;display:block}
+      .ring.big{left:1300px;top:300px;width:460px;height:460px}.ring.wave{left:1340px;top:470px;width:380px;height:380px}
+      .cring{left:1180px;top:230px;width:620px;height:620px}
+      ${clean ? `
+      .mark,.kicker,.num,.badge,.plate,.cnum{border:0;box-shadow:none}
+      .mark{border-radius:14px}
+      .kicker{padding:10px 22px 8px;border-radius:10px}
+      .card{background:rgba(255,255,255,.05);border:1.5px solid rgba(255,255,255,.12);box-shadow:none;border-radius:18px}
+      .bubble{display:none}
+      .browser{border:1.5px solid rgba(255,255,255,.18);box-shadow:0 30px 80px rgba(0,0,0,.5)}
+      .bar{background:#1E2026;border-bottom:1px solid #2C2F36}.url{background:#2A2D34}
+      .ok{border:0}
+      .arrow{border-radius:10px;border:1.5px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05)}
+      .badge{background:transparent;border:10px solid ${hi};box-shadow:none}
+      .tool path{fill:none;stroke:#E8ECF2;stroke-width:6}
+      .cover{background:radial-gradient(1200px 900px at 72% 50%,${bg2},${bg1})}
+      .cnum{background:${hi};border-radius:12px;transform:none}
+      .rays{display:none}.cq{display:none}
+      nav u{background:${hi}}` : ""}`,
     data: { times: beats.map((b, i) => i === 0 ? Math.max(b.at.frame - start, coverFrames) : b.at.frame - start), end: end - start, tr: options.transitionFrames, cover: coverFrames,
       caps: captions.map(c => [c.s, c.e]) },
     setup: `const secs=[...root.querySelectorAll('section')], bars=[...root.querySelectorAll('nav u')], caps=[...root.querySelectorAll('.cap')];

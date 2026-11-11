@@ -54,7 +54,7 @@ async function main() {
       const before = new Set(S.videos.map(v => v.id));
       const brand = resolveBrand(x.site, x.brand || {});
       try {
-        for (let n = 0; n < Math.min(3, x.now || 0); n++) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand, { now: true });
+        for (let n = 0; n < Math.min(3, x.now || 0); n++) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand, { now: true, tutorial: x.site.video?.shorts === false });
         if (x.fill !== false) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand);
         if (x.fill !== false) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand, { tutorial: true });
       } catch (e) { S.report.errors.push('video: ' + e.message); }
@@ -80,6 +80,7 @@ async function main() {
     for (const [id, v] of full) if (!all.has(id)) all.set(id, v);
     for (const v of all.values()) {
       if (skips.has(v.id) || Date.parse(v.publish_at) < now - 3600000 || !v.beats?.length) continue;
+      if (x.site.video?.shorts === false && v.format !== 'tutorial') continue;   // Shorts turned off for this website
       jobs.push({ id: v.id, site: x.site.id, hash: v.hash, publish_at: v.publish_at, url: v.url, domain: x.site.domain.replace(/^www\./, ''),
         source: v.source, cover: v.cover, mascot: v.mascot, theme: v.theme, voice: v.voice,
         speed: Number(x.site.video?.speed) || (String(v.voice).startsWith('b') ? 1.08 : 1.06), beats: v.beats, ...(v.format ? { format: v.format } : {}) });

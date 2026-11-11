@@ -50,7 +50,7 @@ const component: ProducerPackage & AdmissionPackage = { producers: [
     if (messages.some(item => item.id === message.id) || (messages.at(-1)?.at.frame ?? -1) > at.frame) throw new Error("MOT beats need unique ids and chronological times.");
     return { outputs: { messages: value([...messages, { ...message, at }]) }, needs: {} };
   } },
-  { producer: producers.render, handler: ({ inputs }) => ({ outputs: { visual: value((inline<SceneOptions>(inputs.options).format === "tutorial" ? renderTutorial : renderScene)(inline<Timeline>(inputs.timeline),
+  { producer: producers.render, handler: ({ inputs }) => ({ outputs: { visual: value((String(inline<SceneOptions>(inputs.options).format).startsWith("tutorial") ? renderTutorial : renderScene)(inline<Timeline>(inputs.timeline),
     inline<SpatialFrame>(inputs.within), inline<TemporalWindow>(inputs.window), inline<FontStackRef>(inputs.font), inline<FontStackRef>(inputs.display),
     inline<Beat[]>(inputs.messages), inline<SceneOptions>(inputs.options))) }, needs: {} }) },
 ] };

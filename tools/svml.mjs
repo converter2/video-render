@@ -9,6 +9,7 @@ const part = s => clean(s).replace(/[|=~]/g, '-');
 export function buildSvml(job, timing, images = {}) {
   const beats = timing.beats;
   const wide = job.format === 'tutorial';
+  const plain = wide && job.mascot === 'none';   // tutorials in the site's own clean style: no character, plain type
   const cl = timing.captions, caps = [];
   for (let i = 0; i < cl.length; i++) {
     let e = cl[i].end;
@@ -51,8 +52,8 @@ export function buildSvml(job, timing, images = {}) {
 ${inst}
   </time:Timeline>
   <spatial:Canvas id="canvas" width="${wide ? 1920 : 1080}" height="${wide ? 1080 : 1920}"/>
-  <fonts:Face id="body-face" package="@fontsource-variable/fredoka" weight="600" style="normal"/>
-  <fonts:Face id="display-face" package="@fontsource/luckiest-guy" weight="400" style="normal"/>
+  <fonts:Face id="body-face" package="${plain ? '@fontsource/barlow' : '@fontsource-variable/fredoka'}" weight="600" style="normal"/>
+  <fonts:Face id="display-face" package="${plain ? '@fontsource/barlow' : '@fontsource/luckiest-guy'}" weight="${plain ? 800 : 400}" style="normal"/>
   <media:FontStack id="body" primary={body-face}/>
   <media:FontStack id="display" primary={display-face}/>
 
@@ -72,7 +73,7 @@ ${inst}
   </audio:Track>
 
   <ap:Scene id="scene" timeline={story.timeline} within={canvas.bounds} font={body} display={display}
-    during={story.window} brand="${clean(job.domain)}"${clean(job.source) ? ` source="${clean(job.source)}"` : ''} mascot="${job.mascot === 'car' ? 'car' : 'buddy'}" theme="${theme}"${wide ? ' format="tutorial"' : ''}
+    during={story.window} brand="${clean(job.domain)}"${clean(job.source) ? ` source="${clean(job.source)}"` : ''} mascot="${job.mascot === 'car' ? 'car' : 'buddy'}" theme="${theme}"${wide ? ` format="${plain ? 'tutorial-clean' : 'tutorial'}"` : ''}
     captions="${caps.join('|')}"${job.cover?.text ? ` cover-text="${part(job.cover.text)}" cover-frames="${COVER_FRAMES}"${job.cover.number ? ` cover-number="${part(job.cover.number)}"` : ''}` : ''}>
 ${beatEls}
   </ap:Scene>

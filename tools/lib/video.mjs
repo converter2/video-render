@@ -58,6 +58,21 @@ export function videoTheme(site, brand) {
   return { bg1, bg2, hi, body };
 }
 
+/** Tutorials: a calm, dark look in the website's own brand colours (no cartoon sky), so each site's tutorials look like that site. */
+export function tutorialTheme(site, brand) {
+  const v = site.video || {};
+  const valid = c => /^#[0-9a-f]{6}$/i.test(c || '') ? c : '';
+  const cols = [valid(v.color), valid(brand?.primary), valid(brand?.accent), valid(site.brand?.accent_fallback)].filter(Boolean)
+    .map(c => ({ c, x: hexToHsl(c) })).filter(o => o.x);
+  const main = cols.filter(o => o.x[1] > 0.3).sort((a, b) => b.x[1] - a.x[1])[0] || { c: '#4C8DFF', x: hexToHsl('#4C8DFF') };
+  const [h] = main.x;
+  const hi = main.x[2] < 0.5 ? hsl(h, Math.max(0.7, main.x[1]), 0.6) : main.c;
+  // a second colour for ticks and "pass" marks: the brand's other colour if it is far enough round the wheel, else a fresh green
+  const other = cols.find(o => o.c !== main.c && Math.min(Math.abs(o.x[0] - h), 360 - Math.abs(o.x[0] - h)) > 60 && o.x[1] > 0.3);
+  const ok = other ? (other.x[2] < 0.45 ? hsl(other.x[0], 0.7, 0.55) : other.c) : '#2FD39E';
+  return { bg1: hsl(h, 0.18, 0.08), bg2: hsl(h, 0.22, 0.15), hi, body: ok };
+}
+
 export function defaultMascot(site) {
   if (site.video?.mascot) return site.video.mascot === 'car' ? 'car' : 'buddy';
   return /\b(car|cars|mot|vehicle|vehicles|tesla|charger|7[- ]seater|motor|driving)\b/i.test(`${site.domain} ${site.name} ${site.about}`) ? 'car' : 'buddy';
@@ -83,7 +98,7 @@ export function slotTimes(v = {}) {
   return Array.from({ length: n }, (_, i) => { const m = Math.round(lo + span * (i + 0.5) / n); return `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; });
 }
 function videoSlots(site, ymd, tut) {
-  const times = tut ? slotTimes({ per_day: Math.max(1, Math.min(3, Number(site.video.tutorials_per_day) || 1)), window_start: site.video.tutorial_start || '10:00', window_end: site.video.tutorial_end || '20:00' }) : slotTimes(site.video);
+  const times = tut ? slotTimes({ per_day: Math.max(1, Math.min(10, Number(site.video.tutorials_per_day) || 1)), window_start: site.video.tutorial_start || site.video.window_start || '08:00', window_end: site.video.tutorial_end || site.video.window_end || '22:00' }) : slotTimes(site.video);
   const n = times.length;
   return times.map((t, i) => {
     const jitter = Math.round((seeded(`${tut ? 'tut' : 'vid'}${site.id}${ymd}${i}`) - 0.5) * (n > 4 ? 10 : 16));
@@ -418,6 +433,7 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
   const { site, report } = S;
   if (!videoOn(site) || apiState.down) return;
   if (tut && !(Number(site.video.tutorials_per_day) > 0)) return;
+  if (!tut && site.video.shorts === false) return;
   const now = Date.now();
   const tz = site.timezone || 'UTC';
   const today = localYmd(new Date(), tz);
@@ -465,8 +481,8 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
       : `videos: every allowed page has had a video in the last ${repeatDays} days; add more pages to the video list`);
     return;
   }
-  const mascot = defaultMascot(site);
-  const theme = videoTheme(site, brand);
+  const mascot = tut && site.video?.tutorial_style !== 'cartoon' ? 'none' : defaultMascot(site);
+  const theme = tut && site.video?.tutorial_style !== 'cartoon' ? tutorialTheme(site, brand) : videoTheme(site, brand);
   const recentTitles = S.videos.filter(v => (v.format === 'tutorial') === tut).slice(-20).map(v => v.title);
   if (!tut) report.videos_planned = 0;
   report.tutorials_planned = report.tutorials_planned || 0;
