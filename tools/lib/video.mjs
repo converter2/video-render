@@ -64,13 +64,23 @@ export function tutorialTheme(site, brand) {
   const valid = c => /^#[0-9a-f]{6}$/i.test(c || '') ? c : '';
   const cols = [valid(v.color), valid(brand?.primary), valid(brand?.accent), valid(site.brand?.accent_fallback)].filter(Boolean)
     .map(c => ({ c, x: hexToHsl(c) })).filter(o => o.x);
-  const main = cols.filter(o => o.x[1] > 0.3).sort((a, b) => b.x[1] - a.x[1])[0] || { c: '#4C8DFF', x: hexToHsl('#4C8DFF') };
+  const main = (valid(v.color) && { c: v.color, x: hexToHsl(v.color) }) || cols.filter(o => o.x[1] > 0.3).sort((a, b) => b.x[1] - a.x[1])[0] || { c: '#4C8DFF', x: hexToHsl('#4C8DFF') };
   const [h] = main.x;
   const hi = main.x[2] < 0.5 ? hsl(h, Math.max(0.7, main.x[1]), 0.6) : main.c;
   // a second colour for ticks and "pass" marks: the brand's other colour if it is far enough round the wheel, else a fresh green
   const other = cols.find(o => o.c !== main.c && Math.min(Math.abs(o.x[0] - h), 360 - Math.abs(o.x[0] - h)) > 60 && o.x[1] > 0.3);
-  const ok = other ? (other.x[2] < 0.45 ? hsl(other.x[0], 0.7, 0.55) : other.c) : '#2FD39E';
+  const ok = valid(v.color2) || (other ? (other.x[2] < 0.45 ? hsl(other.x[0], 0.7, 0.55) : other.c) : '#2FD39E');
   return { bg1: hsl(h, 0.18, 0.08), bg2: hsl(h, 0.22, 0.15), hi, body: ok };
+}
+
+/** What a finished video depends on; a change here means the video is made again. */
+export function itemHash(item, site) {
+  return hash(JSON.stringify([item.beats, item.theme, item.mascot, item.voice, site.domain, item.source, item.cover, item.format || '']), 12);
+}
+/** The look a tutorial should have under the website's current settings. */
+export function tutorialLook(site, brand) {
+  const clean = site.video?.tutorial_style !== 'cartoon';
+  return { mascot: clean ? 'none' : defaultMascot(site), theme: clean ? tutorialTheme(site, brand) : videoTheme(site, brand) };
 }
 
 export function defaultMascot(site) {
@@ -532,7 +542,7 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
         title: plan.title, description: plan.description, fb_caption: plan.fb_caption, hashtags: plan.hashtags,
         source: plan.source, cover: { text: plan.cover_text, number: plan.cover_number }, mascot, theme, voice: defaultVoice(site), beats: plan.beats, cost
       };
-      item.hash = hash(JSON.stringify([item.beats, item.theme, item.mascot, item.voice, site.domain, item.source, item.cover, item.format || '']), 12);
+      item.hash = itemHash(item, site);
       S.videos.push(item);
       recentTitles.push(item.title);
       S.videoHistory[hk(url)] = { last: item.publish_at };

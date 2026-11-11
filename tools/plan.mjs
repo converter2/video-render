@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { keyFrom, openJson, sealJson } from './seal.mjs';
-import { planVideos, videoOn } from './lib/video.mjs';
+import { planVideos, videoOn, itemHash, tutorialLook } from './lib/video.mjs';
 import { resolveBrand } from './lib/render.mjs';
 
 const args = process.argv.slice(2);
@@ -32,6 +32,18 @@ async function main() {
   const known = new Set(sites.flatMap(x => (x.videos || []).map(v => v.id)));
   plans.items = (plans.items || []).filter(p => Date.parse(p.item.publish_at) > now - 6 * 3600000);
   plans.notes = plans.notes || {};
+  // tutorials not yet public take the website's current look: a change of template re-makes them
+  let restyled = 0;
+  for (const p of plans.items) {
+    const x = sites.find(s => s.site.id === p.site);
+    if (!x || p.item.format !== 'tutorial' || Date.parse(p.item.publish_at) < now + 2 * 3600000) continue;
+    const look = tutorialLook(x.site, resolveBrand(x.site, x.brand || {}));
+    if (p.item.mascot === look.mascot && JSON.stringify(p.item.theme) === JSON.stringify(look.theme)) continue;
+    Object.assign(p.item, look, { rev: (p.item.rev || 0) + 1 });
+    p.item.hash = itemHash(p.item, x.site);
+    restyled++;
+  }
+  if (restyled) log(`${restyled} tutorial${restyled === 1 ? '' : 's'} moved to the current template`);
 
   let browser = null;
   const apiState = { fails: 0, down: false };
@@ -76,7 +88,7 @@ async function main() {
     // the full scripts come from here
     const full = new Map(plans.items.filter(p => p.site === x.site.id).map(p => [p.item.id, p.item]));
     const all = new Map();
-    for (const v of x.videos || []) all.set(v.id, v.beats?.length ? v : full.get(v.id) && full.get(v.id).hash === v.hash ? full.get(v.id) : v);
+    for (const v of x.videos || []) all.set(v.id, full.get(v.id) || v);
     for (const [id, v] of full) if (!all.has(id)) all.set(id, v);
     for (const v of all.values()) {
       if (skips.has(v.id) || Date.parse(v.publish_at) < now - 3600000 || !v.beats?.length) continue;
