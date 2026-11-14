@@ -20,6 +20,7 @@ import { resolveTemporalInstantReference, resolveTemporalWindowReference, resolv
   temporalWindowAttributeNames, temporalWindowAttributeVocabulary } from "@hypit/temporal/markup";
 import { renderScene } from "./render.js";
 import { renderTutorial } from "./tutorial.js";
+import { renderNames } from "./names.js";
 import type { SceneOptions, Beat } from "./render.js";
 
 const module = { name: "@autoposter/scene", version: "1" } as const;
@@ -50,7 +51,7 @@ const component: ProducerPackage & AdmissionPackage = { producers: [
     if (messages.some(item => item.id === message.id) || (messages.at(-1)?.at.frame ?? -1) > at.frame) throw new Error("MOT beats need unique ids and chronological times.");
     return { outputs: { messages: value([...messages, { ...message, at }]) }, needs: {} };
   } },
-  { producer: producers.render, handler: ({ inputs }) => ({ outputs: { visual: value((String(inline<SceneOptions>(inputs.options).format).startsWith("tutorial") ? renderTutorial : renderScene)(inline<Timeline>(inputs.timeline),
+  { producer: producers.render, handler: ({ inputs }) => ({ outputs: { visual: value((String(inline<SceneOptions>(inputs.options).format) === "names" ? renderNames : String(inline<SceneOptions>(inputs.options).format).startsWith("tutorial") ? renderTutorial : renderScene)(inline<Timeline>(inputs.timeline),
     inline<SpatialFrame>(inputs.within), inline<TemporalWindow>(inputs.window), inline<FontStackRef>(inputs.font), inline<FontStackRef>(inputs.display),
     inline<Beat[]>(inputs.messages), inline<SceneOptions>(inputs.options))) }, needs: {} }) },
 ] };
@@ -89,7 +90,7 @@ export const decodeSurface: StructuredSurfaceHandler = ({ element, resolveRefere
     const fields = ["kicker", "title", "value", "label", "items", "note", "cues", "variants", "bubble", "plate", "tone", "parts", "image"] as const;
     assertAttributes(child, ["id", "kind", ...fields, ...temporalInstantAttributeNames]); assertEmptyElement(child);
     const messageId = textAttribute(child, "id"), kind = textAttribute(child, "kind");
-    if (!["hook", "stat", "bars", "rank", "columns", "list", "showcase", "close", "causes", "screen", "step"].includes(kind)) throw new Error(`Beat kind ${kind} is not known.`);
+    if (!["hook", "stat", "bars", "rank", "columns", "list", "showcase", "close", "causes", "screen", "step", "fonts", "paste"].includes(kind)) throw new Error(`Beat kind ${kind} is not known.`);
     const opt = (name: string) => { const raw = child.attributes[name]; return raw === undefined ? "" : textAttribute(child, name); };
     const at = resolveTemporalInstantReference({ element: child, resolveReference });
     const key = `message-${++index}`;

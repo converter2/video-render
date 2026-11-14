@@ -108,6 +108,8 @@ async function renderOne(job, w) {
   hypit(['get', id, '--output', 'final.video', '--to', raw]);
   const loud = ['-af', 'loudnorm=I=-14:TP=-1.5:LRA=7', '-ar', '48000', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart'];
   if (job.format === 'tutorial') {
+    // tutorials run for minutes, so they are packed tighter (they are mostly still pictures): about 4 MB a minute
+    const TUT_ENC = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '27', '-tune', 'animation', '-pix_fmt', 'yuv420p'];
     // the "test it" parts: a recording of the real tool page, laid into the browser window drawn in the scene
     const S = { x: 80, y: 256, w: 1180, h: 646 };
     const parts = [];
@@ -127,8 +129,8 @@ async function renderOne(job, w) {
       last = `v${j}`;
     });
     if (parts.length) run('ffmpeg', ['-v', 'error', '-y', '-i', raw, ...inputs, '-filter_complex', chain.replace(/;$/, ''), '-map', `[${last}]`, '-map', '0:a',
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', ...loud, final], { timeout: 40 * 60000 });
-    else run('ffmpeg', ['-v', 'error', '-y', '-i', raw, '-c:v', 'copy', ...loud, final]);
+      ...TUT_ENC, ...loud, final], { timeout: 40 * 60000 });
+    else run('ffmpeg', ['-v', 'error', '-y', '-i', raw, ...TUT_ENC, ...loud, final], { timeout: 40 * 60000 });
     // thumbnail: the opening cover at 1280 x 720, the size YouTube asks for
     run('ffmpeg', ['-v', 'error', '-y', '-ss', '0.2', '-i', final, '-frames:v', '1', '-vf', 'scale=1280:720', '-q:v', '3', thumb]);
   } else {

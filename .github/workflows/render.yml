@@ -83,7 +83,7 @@ jobs:
           cp project/* .hypit-src/examples/autoposter/
           cd .hypit-src
           corepack enable
-          pnpm add -w --silent @fontsource/luckiest-guy@5.3.0 @fontsource-variable/fredoka@5.3.0 @fontsource/barlow@5.2.5
+          pnpm add -w --silent @fontsource/luckiest-guy@5.3.0 @fontsource-variable/fredoka@5.3.0 @fontsource/barlow@5.2.5 @fontsource-variable/space-grotesk@5.2.5 @fontsource-variable/noto-sans@5.2.5 @fontsource/noto-sans-math@5.2.5 @fontsource-variable/noto-sans-symbols@5.2.5 @fontsource/noto-sans-symbols-2@5.2.5
           pnpm install --silent
           pnpm build:public-types > /dev/null
           pnpm --filter @autoposter/scene build

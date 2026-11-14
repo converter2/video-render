@@ -7,7 +7,7 @@ import type { SpatialFrame } from "@hypit/spatial";
 import { assertTemporalWindowFor } from "@hypit/temporal";
 import type { TemporalInstant, TemporalWindow } from "@hypit/temporal";
 
-export type BeatKind = "hook" | "stat" | "bars" | "rank" | "columns" | "list" | "showcase" | "close" | "causes" | "screen" | "step";
+export type BeatKind = "hook" | "stat" | "bars" | "rank" | "columns" | "list" | "showcase" | "close" | "causes" | "screen" | "step" | "fonts" | "paste";
 /** `cues` holds absolute frames, one per revealed element, in reveal order. */
 export type Beat = { id: string; kind: BeatKind; kicker: string; title: string; value: string; label: string; items: string;
   note: string; cues: string; variants: string; bubble: string; plate: string; tone: string; parts: string; image: string; at: TemporalInstant };

@@ -8,6 +8,7 @@ import { readJson, writeJson, hash, seeded, log, zonedToUtc, localYmd, addDays, 
 import { readSitemap, allowedPages } from './pages.mjs';
 import { openPage } from './capture.mjs';
 import { linesFrom } from '../script.mjs';
+import { NAMES, nameScript } from './fancy.mjs';
 
 const API = process.env.ANTHROPIC_URL || 'https://api.anthropic.com/v1/messages';
 const KINDS = ['hook', 'stat', 'bars', 'rank', 'columns', 'list', 'showcase', 'close'];
@@ -75,7 +76,7 @@ export function tutorialTheme(site, brand) {
 
 /** What a finished video depends on; a change here means the video is made again. */
 export function itemHash(item, site) {
-  return hash(JSON.stringify([item.beats, item.theme, item.mascot, item.voice, site.domain, item.source, item.cover, item.format || '']), 12);
+  return hash(JSON.stringify([item.beats, item.theme, item.mascot, item.voice, site.domain, item.source, item.cover, item.format || '', item.logo || '']), 12);
 }
 /** The look a tutorial should have under the website's current settings. */
 export function tutorialLook(site, brand) {
@@ -108,6 +109,8 @@ export function slotTimes(v = {}) {
   return Array.from({ length: n }, (_, i) => { const m = Math.round(lo + span * (i + 0.5) / n); return `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; });
 }
 function videoSlots(site, ymd, tut) {
+  if (tut === 'names') return slotTimes({ per_day: Math.max(1, Math.min(10, Number(site.video.names_per_day) || 1)), window_start: site.video.window_start || '08:00', window_end: site.video.window_end || '22:00' })
+    .map((t, i) => { const j = Math.round((seeded(`nm${site.id}${ymd}${i}`) - 0.5) * 14); return { key: `${ymd}#n${i}`, at: zonedToUtc(ymd, hhmmToMin(t) + 23 + j, site.timezone || 'UTC') }; });
   const times = tut ? slotTimes({ per_day: Math.max(1, Math.min(10, Number(site.video.tutorials_per_day) || 1)), window_start: site.video.tutorial_start || site.video.window_start || '08:00', window_end: site.video.tutorial_end || site.video.window_end || '22:00' }) : slotTimes(site.video);
   const n = times.length;
   return times.map((t, i) => {
@@ -485,6 +488,8 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
   // pages typed in by hand come first, in the order they were listed
   const allowed = [...new Set([...exact, ...urls])].filter(u => !never.some(r => r.test(pathOf(u)) || r.test(u)));
   const pool = allowed.filter(u => !recent.has(u) && !(S.videoHistory[hk(u)]?.skip_until > now) && !(Date.parse(S.videoHistory[hk(u)]?.last || 0) > now - repeatDays * 86400000));
+  // how many pages are still free for this kind of video: shown on the dashboard so the number a day stays realistic
+  report[tut ? 'tut_left' : 'short_left'] = pool.length; report.repeat_days = repeatDays;
   if (!pool.length) {
     report.errors.push(!allowed.length
       ? (listed ? 'videos: no page matches the video page list (check the links and patterns in the website settings)' : 'videos: no pages can get a video (check "Never make videos from")')
@@ -552,6 +557,47 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
   }
   };
   await Promise.all(Array.from({ length: Math.min(4, open.length) }, worker));
+  report[tut ? 'tut_left' : 'short_left'] = pool.length;
+}
+
+/** "Your name in fonts" Shorts for font generator sites: no Claude, one popular first name per video, never the same name twice. */
+export function planNames(S, brand) {
+  const { site, report } = S;
+  if (!videoOn(site) || !(Number(site.video.names_per_day) > 0)) return;
+  const now = Date.now(), tz = site.timezone || 'UTC', today = localYmd(new Date(), tz);
+  const days = Math.max(15, Math.min(30, Number(site.video.plan_days) || 16));
+  const used = new Set(S.videos.map(v => v.slot));
+  const open = Array.from({ length: days + 1 }, (_, i) => addDays(today, i)).flatMap(d => videoSlots(site, d, 'names'))
+    .filter(x => x.at.getTime() > now + 3 * 3600000 && x.at.getTime() < now + (days + 0.5) * 86400000 && !used.has(x.key));
+  // a name comes round again only after a year (the list lasts months; names typed in by hand always go first)
+  const taken = new Set(Object.entries(S.videoHistory).filter(([k, h]) => k.startsWith('n:') && Date.parse(h?.last || 0) > now - 365 * 86400000).map(([k]) => k.slice(2)));
+  for (const v of S.videos) if (v.format === 'names') taken.add(v.name);
+  const extra = String(site.video.names_extra || '').split(/[\s,]+/).map(x => x.trim()).filter(x => /^[\p{L}][\p{L}'-]{1,20}$/u.test(x));
+  const queue = [...new Set([...extra, ...NAMES])].filter(n => !taken.has(n));
+  const look = namesTheme(site, brand);
+  const logo = `${(site.video.logo_letter || site.domain.charAt(0)).slice(0, 2)}|${site.video.logo_name || site.domain.replace(/^www\./, '').replace(/\.[a-z.]+$/i, '')}`;
+  report.names_left = queue.length;
+  for (const slot of open) {
+    const name = queue.shift();
+    if (!name) { report.errors.push('name videos: every name on the list has had a video; add names in the website settings'); break; }
+    const seed = parseInt(hash(name + site.id, 6), 16) % 997;
+    const sc = nameScript(site, name, { seed, sayDomain: sayDomain(site) });
+    const item = { id: `${slot.at.toISOString().slice(0, 10).replace(/-/g, '')}-n${hash(name + slot.key, 7)}`, format: 'names', name,
+      slot: slot.key, url: site.video.names_url || `https://${site.domain}/`, publish_at: slot.at.toISOString(), created: new Date().toISOString(),
+      title: sc.title, description: sc.description, fb_caption: sc.fb_caption, hashtags: sc.hashtags, source: '', cover: sc.cover,
+      mascot: 'none', theme: look, logo, voice: defaultVoice(site), beats: sc.beats };
+    item.hash = itemHash(item, site);
+    S.videos.push(item);
+    S.videoHistory['n:' + name] = { last: item.publish_at };
+    report.names_planned = (report.names_planned || 0) + 1;
+  }
+  report.names_left = queue.length;
+}
+/** Name videos: deep background in the brand's hue, the brand colour for buttons, a warm second colour. */
+export function namesTheme(site, brand) {
+  const t = tutorialTheme(site, brand);
+  const [h] = hexToHsl(t.hi) || [228];
+  return { bg1: hsl(h, 0.55, 0.09), bg2: hsl(h, 0.62, 0.32), hi: t.hi, body: site.video?.color2 || '#FFC83D' };
 }
 
 export function finishVideos(S) {

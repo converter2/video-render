@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { keyFrom, openJson, sealJson } from './seal.mjs';
-import { planVideos, videoOn, itemHash, tutorialLook } from './lib/video.mjs';
+import { planVideos, planNames, videoOn, itemHash, tutorialLook } from './lib/video.mjs';
 import { resolveBrand } from './lib/render.mjs';
 
 const args = process.argv.slice(2);
@@ -69,10 +69,12 @@ async function main() {
         for (let n = 0; n < Math.min(3, x.now || 0); n++) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand, { now: true, tutorial: x.site.video?.shorts === false });
         if (x.fill !== false) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand);
         if (x.fill !== false) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand, { tutorial: true });
+        if (x.fill !== false) planNames(S, brand);
       } catch (e) { S.report.errors.push('video: ' + e.message); }
       const fresh = S.videos.filter(v => !before.has(v.id));
       for (const item of fresh) plans.items.push({ site: x.site.id, item });
-      plans.notes[x.site.id] = { at: new Date().toISOString(), made: fresh.length, errors: S.report.errors.slice(0, 8), note: S.report.note || '', api: S.report.api_problem || '' };
+      plans.notes[x.site.id] = { at: new Date().toISOString(), made: fresh.length, errors: S.report.errors.slice(0, 8), note: S.report.note || '', api: S.report.api_problem || '', names_left: S.report.names_left,
+        tut_left: S.report.tut_left, short_left: S.report.short_left, repeat_days: S.report.repeat_days };
       log(`website ${sites.indexOf(x) + 1}: ${fresh.length} new script${fresh.length === 1 ? '' : 's'}${S.report.errors.length ? `, ${S.report.errors.length} notes` : ''}`);
       if (apiState.down) { log('Claude is not answering:', redact(apiState.reason)); break; }
     }
@@ -92,10 +94,10 @@ async function main() {
     for (const [id, v] of full) if (!all.has(id)) all.set(id, v);
     for (const v of all.values()) {
       if (skips.has(v.id) || Date.parse(v.publish_at) < now - 3600000 || !v.beats?.length) continue;
-      if (x.site.video?.shorts === false && v.format !== 'tutorial') continue;   // Shorts turned off for this website
+      if (x.site.video?.shorts === false && !v.format) continue;   // Shorts turned off for this website (tutorials and name videos have their own switch)
       jobs.push({ id: v.id, site: x.site.id, hash: v.hash, publish_at: v.publish_at, url: v.url, domain: x.site.domain.replace(/^www\./, ''),
         source: v.source, cover: v.cover, mascot: v.mascot, theme: v.theme, voice: v.voice,
-        speed: Number(x.site.video?.speed) || (String(v.voice).startsWith('b') ? 1.08 : 1.06), beats: v.beats, ...(v.format ? { format: v.format } : {}) });
+        speed: Number(x.site.video?.speed) || (String(v.voice).startsWith('b') ? 1.08 : 1.06), beats: v.beats, ...(v.format ? { format: v.format } : {}), ...(v.logo ? { logo: v.logo } : {}) });
     }
   }
   fs.writeFileSync(opt('jobs'), JSON.stringify({ made: new Date().toISOString(), jobs }));
