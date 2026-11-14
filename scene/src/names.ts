@@ -45,37 +45,58 @@ export function renderNames(timeline: Timeline, within: SpatialFrame, window: Te
     switch (beat.kind) {
       case "hook": return `<section data-kind="hook">
         <div class="kicker a" data-d="0">${t(`${k}-kick`, beat.kicker, 30, WHITE, ui, [{ name: "letter-spacing", value: "0.08em" }, { name: "text-transform", value: "uppercase" }])}</div>
-        <div class="box big a" data-d="4"><span class="lab">${t(`${k}-lab`, "Your text", 26, MUTED, ui)}</span>
+        <div class="box big a" data-d="4"><span class="lab">${t(`${k}-lab`, beat.label || "Your text", 26, MUTED, ui)}</span>
           <div class="typed"><span class="clip">${t(`${k}-name`, name, fit(name, 150, 7), INK, ui, [])}</span><i class="caret"></i></div>
-          <div class="row"><span class="count">${t(`${k}-cnt`, `${[...name].length} of 200 characters`, 24, MUTED, ui)}</span><span class="btn">${t(`${k}-btn`, "Copy all styles", 26, WHITE, ui)}</span></div></div>
-        <div class="hint a" data-d="${(cues[0] ?? 20) + 26}">${t(`${k}-hint`, "12 styles", 64, gold, ui, [...shadow])}</div>
+          <div class="row"><span class="count">${t(`${k}-cnt`, `${[...name].length} of 200 characters`, 24, MUTED, ui)}</span><span class="btn">${t(`${k}-btn`, beat.label === "Search" ? "Tap to copy" : "Copy all styles", 26, WHITE, ui)}</span></div></div>
+        <div class="hint a" data-d="${(cues[0] ?? 20) + 26}">${t(`${k}-hint`, beat.note || "12 styles", 64, gold, ui, [...shadow])}</div>
       </section>`;
       case "fonts": {
         const items = parseItems(beat.items).slice(0, 12);
         return `<section data-kind="fonts">
           <div class="box small">${t(`${k}-name`, name, 64, INK, ui, [])}<i class="caret on"></i></div>
           <div class="list"><div class="track">${items.map((it, j) => `<div class="card" data-d="${cues[j] ?? j * 22}">
-            <div class="fx">${t(`${k}-v${j}`, it.value, fit(it.value, 76, 14), INK, fancy)}</div>
+            <div class="fx">${t(`${k}-v${j}`, it.value, [...it.value].length <= 3 ? 96 : fit(it.value, 76, 14), INK, fancy)}</div>
             <div class="meta"><span>${t(`${k}-l${j}`, it.label, 26, MUTED, ui)}</span><span class="copy">${t(`${k}-c${j}`, "Copy", 24, hi, ui)}</span></div></div>`).join("")}</div></div>
         </section>`;
       }
-      case "paste": return `<section data-kind="paste">
-        <div class="kicker a" data-d="0">${t(`${k}-kick`, beat.kicker, 30, WHITE, ui, [{ name: "letter-spacing", value: "0.08em" }, { name: "text-transform", value: "uppercase" }])}</div>
+      case "paste": {
+        // where the copied text goes: a social profile (default), a dark chat-app profile, or a game's name screen
+        const where = beat.plate || "";
+        const kick = `<div class="kicker a" data-d="0">${t(`${k}-kick`, beat.kicker, 30, WHITE, ui, [{ name: "letter-spacing", value: "0.08em" }, { name: "text-transform", value: "uppercase" }])}</div>`;
+        const toast = `<div class="toast">${t(`${k}-toast`, `Copied: ${beat.label}`, 30, WHITE, ui)}</div>`;
+        const pasted = (size: number, room: number, color = INK) => `<span class="paste">${t(`${k}-bio`, beat.value, fit(beat.value, size, room), color, fancy)}</span>`;
+        if (where === "chat") return `<section data-kind="paste">${kick}
+          <div class="dcard a" data-d="2"><div class="dban"></div><span class="dav"></span><i class="ddot"></i>
+            <div class="dbody"><div class="dname">${pasted(64, 13, WHITE)}</div>
+              <div class="dhandle">${t(`${k}-h`, "@" + (name.toLowerCase().replace(/[^a-z0-9]+/g, "") || "player").slice(0, 14), 30, "#B5BAC1", ui)}</div>
+              <div class="dsep"></div><div class="dlab">${t(`${k}-al`, "ABOUT ME", 24, "#B5BAC1", ui, [{ name: "letter-spacing", value: "0.06em" }])}</div>
+              <div class="dtext">${t(`${k}-at`, "Online most evenings", 30, "#DBDEE1", ui)}</div>
+              <div class="dbtn">${t(`${k}-msg`, "Send message", 30, WHITE, ui)}</div></div></div>${toast}</section>`;
+        if (where === "game") return `<section data-kind="paste">${kick}
+          <div class="gcard a" data-d="2"><div class="glab">${t(`${k}-gl`, "DISPLAY NAME", 28, "#9AA3C7", ui, [{ name: "letter-spacing", value: "0.1em" }])}</div>
+            <div class="gin">${pasted(66, 12, WHITE)}<i class="gcar"></i></div>
+            <div class="gok">${t(`${k}-ok`, "Save", 34, INK, ui)}</div>
+            <div class="gplayer"><span class="gav"></span><div><div class="gpn">${t(`${k}-gpn`, beat.value, fit(beat.value, 44, 14), WHITE, fancy)}</div>
+              <div class="glv">${t(`${k}-lv`, "Level 27", 28, gold, ui)}</div></div></div></div>${toast}</section>`;
+        const stats = where === "short" ? ["Following", "Followers", "Likes"] : ["Posts", "Followers", "Following"];
+        const nums = where === "short" ? ["212", "8,431", "40.2K"] : ["48", "1,204", "312"];
+        const inName = where === "name";   // the copied text becomes the profile name
+        return `<section data-kind="paste">${kick}
         <div class="phone a" data-d="2">
-          <div class="ph-top"><span class="av"></span><div class="stats">${["Posts", "Followers", "Following"].map((s, j) => `<div><b>${t(`${k}-sn${j}`, ["48", "1,204", "312"][j]!, 40, INK, ui, [])}</b>${t(`${k}-sl${j}`, s, 24, MUTED, ui)}</div>`).join("")}</div></div>
-          <div class="pname">${t(`${k}-pn`, name, 40, INK, ui, [])}</div>
-          <div class="bio"><span class="paste">${t(`${k}-bio`, beat.value, fit(beat.value, 60, 15), INK, fancy)}</span></div>
+          <div class="ph-top"><span class="av"></span><div class="stats">${stats.map((st, j) => `<div><b>${t(`${k}-sn${j}`, nums[j]!, 40, INK, ui, [])}</b>${t(`${k}-sl${j}`, st, 24, MUTED, ui)}</div>`).join("")}</div></div>
+          <div class="pname">${inName ? pasted(58, 14) : t(`${k}-pn`, name, 40, INK, ui, [])}</div>
+          <div class="bio">${inName ? t(`${k}-bio0`, "@" + (name.toLowerCase().replace(/[^a-z0-9]+/g, "") || "me").slice(0, 14), 32, MUTED, ui) : pasted(60, 15)}</div>
           <div class="bio2">${t(`${k}-bio2`, "Coffee, books and long walks", 28, MUTED, ui)}</div>
           <div class="pbtns"><span class="pb blue">${t(`${k}-f`, "Follow", 30, WHITE, ui)}</span><span class="pb">${t(`${k}-m`, "Message", 30, INK, ui)}</span></div>
           <div class="tiles">${Array.from({ length: 6 }, (_, j) => `<i style="background:${["#DCE4FF", "#FFE9B8", "#E4E0FF", "#FFD9E6", "#D8F2FF", "#E9F7DF"][j]}"></i>`).join("")}</div>
-        </div>
-        <div class="toast">${t(`${k}-toast`, `Copied: ${beat.label}`, 30, WHITE, ui)}</div>
+        </div>${toast}
       </section>`;
+      }
       default: return `<section data-kind="close">
         <div class="logo a pp" data-d="0">${mark(`${k}m`, 150)}${t(`${k}-wm`, brand, 92, WHITE, ui, [{ name: "letter-spacing", value: "-0.02em" }])}</div>
-        <div class="ctitle a" data-d="8">${t(`${k}-title`, beat.title, 104, WHITE, ui, [...shadow])}</div>
+        <div class="ctitle a" data-d="8">${t(`${k}-title`, beat.title, fit(beat.title, 104, 15), WHITE, ui, [...shadow])}</div>
         <div class="plate a pp" data-d="${cues[0] ?? 22}">${t(`${k}-plate`, beat.plate || options.brand, fit(beat.plate || options.brand, 76, 17), WHITE, ui, [])}</div>
-        <div class="cmt a" data-d="40">${t(`${k}-cmt`, "Comment your name below", 40, INK, ui, [])}</div>
+        <div class="cmt a" data-d="40">${t(`${k}-cmt`, beat.note || "Comment your name below", 40, INK, ui, [])}</div>
       </section>`;
     }
   });
@@ -90,7 +111,15 @@ export function renderNames(timeline: Timeline, within: SpatialFrame, window: Te
   const cursive = (s: string) => [...s].map(ch => { const u = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(ch), l = "abcdefghijklmnopqrstuvwxyz".indexOf(ch); return u >= 0 ? String.fromCodePoint(0x1D4D0 + u) : l >= 0 ? String.fromCodePoint(0x1D4EA + l) : ch; }).join("");
   const gothic = (s: string) => [...s].map(ch => { const u = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(ch), l = "abcdefghijklmnopqrstuvwxyz".indexOf(ch); return u >= 0 ? String.fromCodePoint(0x1D56C + u) : l >= 0 ? String.fromCodePoint(0x1D586 + l) : ch; }).join("");
   const bubble = (s: string) => [...s].map(ch => { const u = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".indexOf(ch), l = "abcdefghijklmnopqrstuvwxyz".indexOf(ch); return u >= 0 ? String.fromCodePoint(0x24B6 + u) : l >= 0 ? String.fromCodePoint(0x24D0 + l) : ch; }).join("");
-  const cover = coverOn ? `<div class="cover">
+  // a page video's cover comes ready-styled: "main¦second¦third¦KICKER"
+  const pre = cv.includes("¦") ? cv.split("¦") : null;
+  const cover = coverOn && pre ? `<div class="cover">
+      <div class="cv-brand">${mark("cvm", 72)}${t("cv-wm", brand, 52, WHITE, ui, [])}</div>
+      <div class="cv-k">${t("cv-k", (pre[3] || "FANCY FONTS").toUpperCase(), fit(pre[3] || "", 40, 26), gold, ui, [{ name: "letter-spacing", value: "0.1em" }])}</div>
+      <div class="cv-main">${t("cv-main", pre[0] || "", fit(pre[0] || "", 200, 6), WHITE, fancy, [{ name: "text-shadow", value: `0 0 60px ${hi}, 0 10px 40px rgba(0,0,0,.5)` }])}</div>
+      <div class="cv-alt">${[pre[1], pre[2]].filter(Boolean).map((x, j) => `<div class="cv-chip">${t(`cv-a${j}`, x!, fit(x!, 84, 9), INK, fancy)}</div>`).join("")}</div>
+      ${options.coverNumber ? `<div class="cv-badge">${t("cv-n", options.coverNumber, 54, WHITE, ui, [])}</div>` : ""}
+    </div>` : coverOn ? `<div class="cover">
       <div class="cv-brand">${mark("cvm", 72)}${t("cv-wm", brand, 52, WHITE, ui, [])}</div>
       <div class="cv-k">${t("cv-k", "YOUR NAME IN FONTS", 40, gold, ui, [{ name: "letter-spacing", value: "0.1em" }])}</div>
       <div class="cv-main">${t("cv-main", cursive(cv), fit(cv, 230, 6), WHITE, fancy, [{ name: "text-shadow", value: `0 0 60px ${hi}, 0 10px 40px rgba(0,0,0,.5)` }])}</div>
@@ -138,6 +167,23 @@ export function renderNames(timeline: Timeline, within: SpatialFrame, window: Te
       .pbtns{display:flex;gap:20px;margin-top:50px}
       .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:40px -50px 0}.tiles i{display:block;height:170px}.pb{flex:1;text-align:center;border-radius:18px;padding:24px 0 20px;background:#EEF0F6}.pb.blue{background:${hi}}
       .toast{position:absolute;left:50%;top:1560px;transform:translateX(-50%);background:${INK};border:3px solid ${hi};border-radius:40px;padding:22px 42px 18px;opacity:0;white-space:nowrap}
+      .dcard{position:absolute;left:110px;right:110px;top:460px;height:900px;background:#232428;border-radius:40px;box-shadow:0 40px 100px rgba(0,0,0,.55);overflow:hidden}
+      .dban{height:260px;background:linear-gradient(120deg,${hi},${bg2})}
+      .dav{position:absolute;left:50px;top:170px;width:200px;height:200px;border-radius:50%;background:conic-gradient(from 30deg,${gold},${hi},#FF4D8D,${gold});box-shadow:0 0 0 14px #232428}
+      .ddot{position:absolute;left:205px;top:320px;width:44px;height:44px;border-radius:50%;background:#23A55A;box-shadow:0 0 0 10px #232428}
+      .dbody{position:absolute;left:50px;right:50px;top:400px}
+      .dname{min-height:100px;display:flex;align-items:center}
+      .dhandle{margin-top:6px}
+      .dsep{height:3px;background:#3F4147;margin:44px 0 30px}
+      .dtext{margin-top:12px}
+      .dbtn{margin-top:70px;background:${hi};border-radius:18px;padding:24px 0 20px;text-align:center}
+      .gcard{position:absolute;left:90px;right:90px;top:470px;height:860px;border-radius:36px;background:linear-gradient(160deg,#151A3A,#0B0E22);border:4px solid ${hi};box-shadow:0 0 0 10px rgba(43,89,255,.18),0 40px 100px rgba(0,0,0,.55);padding:70px 56px;box-sizing:border-box}
+      .gin{margin-top:22px;height:150px;border-radius:22px;background:#1F2652;border:3px solid #3A4590;display:flex;align-items:center;padding:0 30px}
+      .gcar{display:inline-block;width:6px;height:80px;background:${gold};margin-left:8px;border-radius:3px}
+      .gok{margin-top:34px;background:${gold};border-radius:20px;padding:26px 0 22px;text-align:center}
+      .gplayer{margin-top:110px;display:flex;align-items:center;gap:34px;background:rgba(255,255,255,.06);border-radius:26px;padding:34px}
+      .gav{width:150px;height:150px;border-radius:28px;background:conic-gradient(from 0deg,${hi},${gold},${hi});flex:none}
+      .glv{margin-top:10px}
       .logo{position:absolute;left:0;right:0;top:420px;display:flex;flex-direction:column;align-items:center;gap:30px}
       .ctitle{position:absolute;left:0;right:0;top:880px;text-align:center}
       .plate{position:absolute;left:50%;top:1060px;background:${hi};border-radius:30px;padding:34px 56px 28px;box-shadow:0 20px 60px rgba(43,89,255,.55);white-space:nowrap}

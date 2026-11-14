@@ -46,6 +46,7 @@ async function main() {
   if (restyled) log(`${restyled} tutorial${restyled === 1 ? '' : 's'} moved to the current template`);
 
   let browser = null;
+  let changedAny = restyled > 0;   // existing scripts moved or relinked: save even with no new ids
   const apiState = { fails: 0, down: false };
   const usageTotals = { input: 0, output: 0, usd: 0 };
   const timeLeft = () => BUDGET_MS - (Date.now() - STARTED);
@@ -69,18 +70,27 @@ async function main() {
         for (let n = 0; n < Math.min(3, x.now || 0); n++) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand, { now: true, tutorial: x.site.video?.shorts === false });
         if (x.fill !== false) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand);
         if (x.fill !== false) await planVideos(browser, S, usageTotals, apiState, timeLeft, brand, { tutorial: true });
-        if (x.fill !== false) planNames(S, brand);
+        if (x.fill !== false) {
+          const full = new Map(plans.items.filter(p => p.site === x.site.id).map(p => [p.item.id, p.item]));
+          // pages found to have nothing a video can show are remembered here, so they are not read again every run
+          plans.skipped = plans.skipped || {};
+          const sk = plans.skipped[x.site.id] = plans.skipped[x.site.id] || {};
+          for (const [u, at] of Object.entries(sk)) if (Date.parse(at) > now - 120 * 86400000) S.videoHistory[u] = { last: at, skipped: true }; else delete sk[u];
+          await planNames(S, brand, full, browser, timeLeft);
+          for (const [u, h] of Object.entries(S.videoHistory)) if (h?.skipped && !sk[u]) { sk[u] = h.last; changedAny = true; }
+          if (S.changed) changedAny = true;
+        }
       } catch (e) { S.report.errors.push('video: ' + e.message); }
       const fresh = S.videos.filter(v => !before.has(v.id));
       for (const item of fresh) plans.items.push({ site: x.site.id, item });
-      plans.notes[x.site.id] = { at: new Date().toISOString(), made: fresh.length, errors: S.report.errors.slice(0, 8), note: S.report.note || '', api: S.report.api_problem || '', names_left: S.report.names_left,
+      plans.notes[x.site.id] = { at: new Date().toISOString(), made: fresh.length, errors: S.report.errors.slice(0, 8), note: S.report.note || '', api: S.report.api_problem || '', names_left: S.report.names_left, stock_left: S.report.stock_left, moved: S.report.moved, relinked: S.report.relinked, pages_skipped: S.report.pages_skipped,
         tut_left: S.report.tut_left, short_left: S.report.short_left, repeat_days: S.report.repeat_days };
       log(`website ${sites.indexOf(x) + 1}: ${fresh.length} new script${fresh.length === 1 ? '' : 's'}${S.report.errors.length ? `, ${S.report.errors.length} notes` : ''}`);
       if (apiState.down) { log('Claude is not answering:', redact(apiState.reason)); break; }
     }
   } finally { if (browser) await browser.close().catch(() => {}); }
   // sealed files differ on every save, so only save when something changed (that is what wakes the private repo)
-  if (canon(plans) !== before || !fs.existsSync(plansFile)) { plans.updated = new Date().toISOString(); fs.writeFileSync(plansFile, sealJson(plans, key)); log('new scripts saved'); }
+  if (canon(plans) !== before || changedAny || !fs.existsSync(plansFile)) { plans.updated = new Date().toISOString(); fs.writeFileSync(plansFile, sealJson(plans, key)); log('new scripts saved'); }
 
   // everything that needs a video: the private repo's videos (not skipped) plus the new scripts
   const jobs = [];

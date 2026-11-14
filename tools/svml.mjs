@@ -57,8 +57,10 @@ ${names ? `  <fonts:Face id="body-face" package="@fontsource-variable/noto-sans"
   <fonts:Face id="math-face" package="@fontsource/noto-sans-math" weight="400" style="normal"/>
   <fonts:Face id="sym-face" package="@fontsource-variable/noto-sans-symbols" weight="400" style="normal"/>
   <fonts:Face id="sym2-face" package="@fontsource/noto-sans-symbols-2" weight="400" style="normal"/>
+  <fonts:Face id="jv-face" package="@fontsource-variable/noto-sans-javanese" weight="400" style="normal"/>
+  <fonts:Face id="dv-face" package="@fontsource/dejavu-sans" weight="400" style="normal"/>
   <fonts:Face id="display-face" package="@fontsource-variable/space-grotesk" weight="600" style="normal"/>
-  <media:FontStack id="body" primary={body-face}><media:Fallback font={math-face}/><media:Fallback font={sym-face}/><media:Fallback font={sym2-face}/></media:FontStack>
+  <media:FontStack id="body" primary={body-face}><media:Fallback font={math-face}/><media:Fallback font={sym-face}/><media:Fallback font={sym2-face}/><media:Fallback font={jv-face}/><media:Fallback font={dv-face}/></media:FontStack>
   <media:FontStack id="display" primary={display-face}><media:Fallback font={body-face}/></media:FontStack>` : `  <fonts:Face id="body-face" package="${plain ? '@fontsource/barlow' : '@fontsource-variable/fredoka'}" weight="600" style="normal"/>
   <fonts:Face id="display-face" package="${plain ? '@fontsource/barlow' : '@fontsource/luckiest-guy'}" weight="${plain ? 800 : 400}" style="normal"/>
   <media:FontStack id="body" primary={body-face}/>

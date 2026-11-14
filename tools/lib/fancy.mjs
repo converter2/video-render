@@ -49,8 +49,25 @@ const HOOKS = [
 ];
 
 /** The script for one name video. Only the words the voice says and the screen shows; the scene does the rest. */
-export function nameScript(site, name, { seed = 0, sayDomain } = {}) {
+// single letters (the /letters/a pages) get their own words
+const LTITLES = [l => `Letter ${l} in different fonts`, l => `${l} in 12 fancy fonts`, l => `Fancy letter ${l} to copy and paste`, l => `The letter ${l} written 12 ways`];
+const LHOOKS = [l => `The letter ${l}, in 12 fancy fonts.`, l => `Here is ${l}, written 12 different ways.`, l => `Letter ${l}. Which style is yours?`];
+
+export function nameScript(site, name, { seed = 0, sayDomain, letter = false } = {}) {
   const pick = (list, k) => list[(seed + k) % list.length];
+  if (letter) {
+    const sc = nameScript(site, name, { seed, sayDomain });
+    const spoken = sayDomain || site.domain;
+    const say = t => [[{ show: t, say: t.split(site.domain).join(spoken) }]];
+    sc.title = pick(LTITLES, 0)(name);
+    sc.description = `The letter ${name} in cursive, gothic, bubble, small caps and more. Copy the style you like, or type any word, at ${site.domain}.`;
+    sc.fb_caption = `Letter ${name} in 12 fonts. Which one would you pick?`;
+    sc.hashtags = ['fonts', 'fancyletters', 'fancytext'];
+    sc.beats[0].kicker = 'Letters in fonts'; sc.beats[0].lines = say(pick(LHOOKS, 1)(name));
+    sc.beats[2].lines = say('Copy the one you like, and use it as an initial in your bio, your username or your game name.');
+    sc.beats[3].lines = say(`Every letter, and any word you type, free at ${site.domain}.`);
+    return sc;
+  }
   const styles = stylesFor(name, seed);
   const spoken = sayDomain || site.domain;
   // the style pasted into the profile: one that reads well in a bio
@@ -90,3 +107,95 @@ Chase Margaret Diego Reagan Milo Charlie Jasper Alaina Walker Adalyn Jason Josie
 Ali Fatima Omar Zara Ayaan Hana Yusuf Aisha Hamza Inaya Zayn Mariam Ibrahim Sara Rayan Noor Adam Laila Musa Amina Idris Safa Bilal Huda Arham Anaya
 Freya Archie Isla Alfie Poppy Freddie Florence Arthur Evie Harry Phoebe Oscar Sienna Jacob Daisy Teddy Rosie Albert Matilda Reuben Esme Ronnie Elsie`
   .split(/\s+/).filter(Boolean).filter((n, i, all) => all.indexOf(n) === i);
+
+/* ---------- page videos: a style page, a platform page or a symbol page ---------- */
+// where the copied text goes, by page: "" a social bio, "short" a short-video profile, "name" the profile name,
+// "chat" a chat app's profile, "game" a game's display-name screen
+export const PLATFORMS = {
+  instagram: { app: 'Instagram', where: '', kick: 'Paste it in your Instagram bio', say: 'paste it into your Instagram bio' },
+  tiktok: { app: 'TikTok', where: 'short', kick: 'Paste it in your TikTok bio', say: 'paste it into your TikTok bio' },
+  facebook: { app: 'Facebook', where: 'name', kick: 'Use it on Facebook', say: 'use it in your Facebook posts and bio' },
+  twitter: { app: 'X and Twitter', where: 'name', kick: 'Use it as your display name', say: 'use it as your X display name' },
+  discord: { app: 'Discord', where: 'chat', kick: 'Paste it as your Discord name', say: 'paste it as your Discord display name' },
+  roblox: { app: 'Roblox', where: 'game', kick: 'Use it as your Roblox name', say: 'use it as your Roblox display name' },
+  fortnite: { app: 'Fortnite', where: 'game', kick: 'Use it as your Fortnite name', say: 'use it as your Fortnite display name' },
+  'free-fire-names': { app: 'Free Fire', where: 'game', kick: 'Use it as your Free Fire name', say: 'use it as your Free Fire name' }
+};
+// the words typed in, by kind of page (a different one each time)
+const SAMPLES = {
+  social: ['golden hour', 'good vibes', 'stay wild', 'dream big', 'little things', 'be kind', 'sunny days', 'slow mornings'],
+  game: ['Shadow', 'NightWolf', 'Blaze', 'Phantom', 'Viper', 'Nova', 'Frost', 'Ace'],
+  numbers: ['2026', '24/7', '1234567890', '99'],
+  birthday: ['Happy birthday', 'Best day ever'],
+  halloween: ['Spooky season', 'Boo'],
+  christmas: ['Happy holidays', 'Snow day'],
+  creepy: ['Hello', 'Wake up'], glitch: ['Error', 'Hello world'], 'weird-text': ['Hello', 'Weird'],
+  tattoo: ['Family', 'Forever', 'Strength', 'Hope'],
+  'nickname-generator': ['Shadow', 'Luna', 'Ace', 'Nova']
+};
+export function sampleFor(slug, seed) {
+  const list = SAMPLES[slug] || (PLATFORMS[slug]?.where === 'game' || slug === 'discord' ? SAMPLES.game : PLATFORMS[slug] ? SAMPLES.social : null);
+  if (list) return list[seed % list.length];
+  return NAMES[(seed * 7) % NAMES.length];
+}
+const quiet = s => String(s).replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim();
+// "Cursive font generator" -> "cursive"; "Instagram fonts" -> "Instagram"
+const styleWord = h1 => quiet(h1).replace(/\b(font|fonts|text|generator|copy and paste|maker|changer|symbol|symbols)\b/gi, '').replace(/\s+/g, ' ').trim();
+
+export function pageScript(site, page, { seed = 0, sayDomain, slug = '' } = {}) {
+  const pick = (list, k) => list[(seed + k) % list.length];
+  const spoken = sayDomain || site.domain;
+  const say = t => [[{ show: t, say: t.split(site.domain).join(spoken) }]];
+  const rows = page.rows, n = rows.length, h1 = quiet(page.h1) || 'Fancy text', word = styleWord(h1) || 'fancy';
+  const plat = PLATFORMS[slug];
+  const lw = plat ? plat.app : word.toLowerCase();
+  if (page.kind === 'symbols') {
+    const deco = /heart|star|music|arrow|check|x-mark|bullet|peace|card|shape|asterisk|wingding|special/.test(slug);
+    const fav = rows[seed % Math.min(3, n)];
+    const name = NAMES[(seed * 11) % NAMES.length];
+    const beats = [
+      { kind: 'hook', kicker: 'Copy and paste', title: h1, label: 'Search', note: `${n} to copy`,
+        lines: say(pick([`${h1}: ${n} you can copy and paste.`, `Need the ${h1.toLowerCase()}? Here are ${n}.`, `${h1}, ready to copy.`], 0)) },
+      { kind: 'fonts', kicker: 'Tap to copy', title: h1, items: rows, lines: [[...rows.map(r => ({ show: quiet(r.label) + '.', say: quiet(r.label) + '.' }))]] }
+    ];
+    if (deco) beats.push({ kind: 'paste', kicker: 'Paste it anywhere', title: name, value: `${fav.value} ${name} ${fav.value}`, label: quiet(fav.label),
+      lines: say(pick(['Tap one to copy it, then paste it into your bio, a message or your notes.', 'Copy one and paste it next to your name, in a message or in a document.'], 1)) });
+    beats.push({ kind: 'close', kicker: 'Free', title: h1, note: 'More symbols on the site',
+      lines: say(`Every ${h1.toLowerCase()}, with the codes to type it, free at ${site.domain}.`) });
+    return {
+      title: pick([`${h1} to copy and paste`, `${h1}: ${n} to copy`, `How to get the ${h1.toLowerCase()}`], 0),
+      description: `${n} ${h1.toLowerCase()} characters to copy and paste, with names, codes and keyboard shortcuts at ${site.domain}.`,
+      fb_caption: `${h1}: ${n} ready to copy. Which one do you use most?`,
+      hashtags: ['symbols', 'copyandpaste', 'textsymbols'],
+      cover: { text: [rows[0].value, rows[1]?.value || '', rows[2]?.value || '', h1].join('¦'), number: `${n} SYMBOLS` },
+      beats
+    };
+  }
+  // a style or platform page: the sample typed in, the page's own styles, pasted where it belongs
+  const text = page.text;
+  // the favourite (pasted, and big on the cover): a style that looks clearly different from plain text
+  const plain = rows.filter(r => !/glitch|upside|mirror|strike|underline|zalgo|small caps|spaced|tiny|superscript|bold sans|^bold$|serif/i.test(r.label));
+  const flair = r => /cursive|script|gothic|old english|fraktur|flower|wing|heart|sparkle|bubble|double|calligraph/i.test(r.label) ? 0 : 1;
+  const pool = (plain.length ? plain : rows).map((r, i) => [r, i]).sort((x, y) => flair(x[0]) - flair(y[0]) || x[1] - y[1]).map(x => x[0]);
+  const fav = pool[seed % Math.min(3, pool.length)];
+  const titleWord = plat ? `${plat.app} fonts` : `${word} text`;
+  return {
+    title: pick(plat
+      ? [`${plat.app} fonts to copy and paste`, `${n} ${plat.app} fonts for your profile`, `Fancy ${plat.app} fonts: ${text}`]
+      : [`${word} font generator: ${text} in ${n} styles`, `${text} in ${lw} fonts`, `${word} text to copy and paste`, `${n} ${lw} fonts to copy and paste`], 0),
+    description: `${text} in ${n} ${plat ? plat.app : lw} styles. Type your own words and copy any style at ${site.domain}.`,
+    fb_caption: pick([`${text} in ${n} ${plat ? plat.app : lw} styles. Which one would you use?`, `${n} ${titleWord.toLowerCase()} styles. Pick a favourite.`], 2),
+    hashtags: ['fonts', plat ? `${plat.app.replace(/\W/g, '').toLowerCase()}fonts` : `${word.replace(/\W/g, '').toLowerCase()}font`, 'fancytext'].slice(0, 3),
+    cover: { text: [fav.value, rows.find(r => r !== fav)?.value || '', rows.filter(r => r !== fav)[1]?.value || '', plat ? `${plat.app} fonts` : `${word} fonts`].join('¦'), number: `${n} STYLES` },
+    beats: [
+      { kind: 'hook', kicker: h1, title: text, note: `${n} ${plat ? plat.app : lw} styles`,
+        lines: say(pick([`${text}, in ${n} ${plat ? plat.app : lw} styles.`, `Type ${text} once, get ${n} ${plat ? plat.app : lw} styles.`, `Here is ${text} in ${lw} fonts.`], 1)) },
+      { kind: 'fonts', kicker: 'Tap to copy', title: text, items: rows.map(({ label, value }) => ({ label, value })),
+        lines: [[...rows.map(r => ({ show: quiet(r.label) + '.', say: quiet(r.label) + '.' }))]] },
+      { kind: 'paste', kicker: plat ? plat.kick : 'Paste it anywhere', title: text, value: fav.value, label: quiet(fav.label), plate: plat ? plat.where : '',
+        lines: say(plat ? `Copy the one you like and ${plat.say}.` : pick(['Copy the one you like, and paste it into your bio, your username or a caption.', 'Tap copy, then paste it wherever you want it to stand out.'], 2)) },
+      { kind: 'close', kicker: 'Free', title: plat ? `${plat.app} fonts` : `${word} fonts`, note: 'Which style would you pick?',
+        lines: say(`Type your own words free at ${site.domain}.`) }
+    ]
+  };
+}

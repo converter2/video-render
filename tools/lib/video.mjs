@@ -8,7 +8,8 @@ import { readJson, writeJson, hash, seeded, log, zonedToUtc, localYmd, addDays, 
 import { readSitemap, allowedPages } from './pages.mjs';
 import { openPage } from './capture.mjs';
 import { linesFrom } from '../script.mjs';
-import { NAMES, nameScript } from './fancy.mjs';
+import { NAMES, nameScript, pageScript, sampleFor } from './fancy.mjs';
+import { readSitePage } from './sitepage.mjs';
 
 const API = process.env.ANTHROPIC_URL || 'https://api.anthropic.com/v1/messages';
 const KINDS = ['hook', 'stat', 'bars', 'rank', 'columns', 'list', 'showcase', 'close'];
@@ -561,37 +562,129 @@ export async function planVideos(browser, S, usageTotals, apiState, timeLeft, br
 }
 
 /** "Your name in fonts" Shorts for font generator sites: no Claude, one popular first name per video, never the same name twice. */
-export function planNames(S, brand) {
+/** The site's own name and letter pages (from its sitemap): each name video links to one of them. */
+export async function namePages(site) {
+  const base = `https://${site.domain.replace(/^www\./, '')}`;
+  const get = async u => { try { const r = await fetch(u, { signal: AbortSignal.timeout(20000), headers: { 'user-agent': 'Mozilla/5.0 (videos)' } }); return r.ok ? await r.text() : ''; } catch { return ''; } };
+  const locs = t => [...t.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map(m => m[1].replace(/&amp;/g, '&'));
+  const top = await get(base + '/sitemap.xml');
+  let urls = locs(top);
+  if (/<sitemapindex/i.test(top)) { const parts = await Promise.all(urls.slice(0, 20).map(get)); urls = parts.flatMap(locs); }
+  const out = [], seen = new Set();
+  const nice = s => decodeURIComponent(s).split(/[-_]+/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  // pages with nothing to show in a video: legal and contact pages, lists of other pages, emoji (colour pictures the
+  // video fonts cannot draw) and the invisible character
+  const SKIP = /^\/(about|contact|privacy|terms|names|letters|symbols|emoji|invisible-character|sitemap)?\/?$|^\/emoji\//i;
+  for (const u of urls) {
+    let p; try { p = new URL(u).pathname; } catch { continue; }
+    let m = p.match(/^\/names\/([^/]+)\/?$/i);
+    if (m) { out.push({ url: u, kind: 'name', text: nice(m[1]) }); continue; }
+    m = p.match(/^\/letters\/([a-z])\/?$/i);
+    if (m) { out.push({ url: u, kind: 'letter', text: m[1].toUpperCase() }); continue; }
+    if (SKIP.test(p)) continue;
+    m = p.match(/^\/symbols\/([^/]+)\/?$/i);
+    if (m) { out.push({ url: u, kind: 'symbol', slug: m[1].toLowerCase() }); continue; }
+    m = p.match(/^\/([^/]+)\/?$/);
+    if (m) out.push({ url: u, kind: 'page', slug: m[1].toLowerCase() });
+  }
+  // one of each kind in turn (a name, a letter, a style or app page, a symbol page), each kind in the sitemap's order
+  const groups = ['name', 'letter', 'page', 'symbol'].map(k => out.filter(x => x.kind === k && !seen.has(x.url) && seen.add(x.url)));
+  const mixed = [];
+  for (let i = 0; groups.some(g => i < g.length); i++) for (const g of groups) if (i < g.length) mixed.push(g[i]);
+  return mixed;
+}
+
+/**
+ * Name videos. Each new one links to its own page on the site (a name page, then a letter page).
+ * Videos made earlier that link to the home page ("stock") go out first, names_stock_per_day of them a day;
+ * when the stock is used up every slot goes to page videos. full: the full scripts by id (kept in step with S.videos).
+ */
+export async function planNames(S, brand, full = new Map(), browser = null, timeLeft = () => 1e9) {
   const { site, report } = S;
   if (!videoOn(site) || !(Number(site.video.names_per_day) > 0)) return;
   const now = Date.now(), tz = site.timezone || 'UTC', today = localYmd(new Date(), tz);
   const days = Math.max(15, Math.min(30, Number(site.video.plan_days) || 16));
-  const used = new Set(S.videos.map(v => v.slot));
-  const open = Array.from({ length: days + 1 }, (_, i) => addDays(today, i)).flatMap(d => videoSlots(site, d, 'names'))
-    .filter(x => x.at.getTime() > now + 3 * 3600000 && x.at.getTime() < now + (days + 0.5) * 86400000 && !used.has(x.key));
-  // a name comes round again only after a year (the list lasts months; names typed in by hand always go first)
-  const taken = new Set(Object.entries(S.videoHistory).filter(([k, h]) => k.startsWith('n:') && Date.parse(h?.last || 0) > now - 365 * 86400000).map(([k]) => k.slice(2)));
-  for (const v of S.videos) if (v.format === 'names') taken.add(v.name);
-  const extra = String(site.video.names_extra || '').split(/[\s,]+/).map(x => x.trim()).filter(x => /^[\p{L}][\p{L}'-]{1,20}$/u.test(x));
-  const queue = [...new Set([...extra, ...NAMES])].filter(n => !taken.has(n));
+  const N = Math.max(1, Math.min(10, Number(site.video.names_per_day) || 1));
+  const K = Math.max(0, Math.min(N, site.video.names_stock_per_day == null || site.video.names_stock_per_day === '' ? Math.max(0, N - 2) : Number(site.video.names_stock_per_day) || 0));
+  // the dashboard's copies can lag behind a move made here earlier: the full scripts are the truth
+  for (const v of S.videos) { const f = full.get(v.id); if (f && f !== v) for (const k of ['slot', 'publish_at', 'url', 'page']) if (f[k] !== undefined) v[k] = f[k]; }
+  const both = (v, fields) => { Object.assign(v, fields); const f = full.get(v.id); if (f && f !== v) Object.assign(f, fields); S.changed = true; };
+  const isPage = v => !!(v.page || full.get(v.id)?.page);
+  const slotIdx = key => Number(String(key).split('#n')[1]);
+  const pages = await namePages(site);
+  if (!pages.length) report.errors.push(`name videos: no /names/ or /letters/ pages found in ${site.domain}/sitemap.xml`);
+  const pageByName = new Map(pages.filter(p => p.kind === 'name').map(p => [p.text.toLowerCase(), p]));
+  const LOCK = now + 40 * 3600000;   // anything going out sooner may already be with YouTube or Facebook: left as it is
+  const names = () => S.videos.filter(v => v.format === 'names');
+
+  // 1. stock whose name has its own page links there instead of the home page
+  const linkedTo = new Set(names().map(v => v.url));
+  for (const v of names().filter(v => !isPage(v) && Date.parse(v.publish_at) > LOCK)) {
+    const p = pageByName.get(String(v.name || '').toLowerCase());
+    if (p && v.url !== p.url && !linkedTo.has(p.url)) { both(v, { url: p.url }); linkedTo.add(p.url); report.relinked = (report.relinked || 0) + 1; }
+  }
+
+  // 2. stock moves up into the first K slots of each day (only what is more than 40 hours away)
+  const allSlots = Array.from({ length: days + 1 }, (_, i) => addDays(today, i)).flatMap(d => videoSlots(site, d, 'names'))
+    .filter(x => x.at.getTime() > now + 3 * 3600000 && x.at.getTime() < now + (days + 0.5) * 86400000);
+  const movable = names().filter(v => !isPage(v) && Date.parse(v.publish_at) > LOCK).sort((a, b) => a.publish_at.localeCompare(b.publish_at));
+  const mov = new Set(movable.map(v => v.id));
+  let used = new Set(S.videos.filter(v => !mov.has(v.id)).map(v => v.slot));
+  // a day never takes more than K made videos: the ones left where they were count first
+  const room = {};
+  for (const v of names()) if (!isPage(v) && !mov.has(v.id)) { const d = String(v.slot).split('#')[0]; room[d] = (room[d] ?? K) - 1; }
+  const stockSlots = allSlots.filter(x => x.at.getTime() > LOCK + 3600000 && slotIdx(x.key) < K && !used.has(x.key))
+    .filter(x => { const d = x.key.split('#')[0]; if ((room[d] ?? K) <= 0) return false; room[d] = (room[d] ?? K) - 1; return true; });
+  let moved = 0;
+  movable.forEach((v, i) => {
+    const t = stockSlots[i];
+    if (!t) return;   // more stock than slots: it keeps its time
+    if (v.slot !== t.key || v.publish_at !== t.at.toISOString()) { both(v, { slot: t.key, publish_at: t.at.toISOString() }); moved++; }
+  });
+  if (moved) report.moved = moved;
+  const lastStock = Math.max(0, ...names().filter(v => !isPage(v)).map(v => Date.parse(v.publish_at)));
+
+  // 3. page videos in the other slots (and in every slot once the stock is used up)
+  used = new Set(S.videos.map(v => v.slot));
+  const open = allSlots.filter(x => !used.has(x.key) && (slotIdx(x.key) >= K || x.at.getTime() > lastStock));
+  const repeat = Math.max(30, Math.min(365, Number(site.video.repeat_days) || 120)) * 86400000;
+  const taken = new Set(S.videos.filter(v => v.format === 'names').map(v => v.url));
+  for (const [k, h] of Object.entries(S.videoHistory)) if (/^https?:/.test(k) && Date.parse(h?.last || 0) > now - repeat) taken.add(k);
+  // names typed in by hand go first when the site has a page for them
+  const extra = String(site.video.names_extra || '').split(/[\s,]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+  const queue = [...extra.map(n => pageByName.get(n)).filter(Boolean), ...pages].filter((p, i, all) => all.indexOf(p) === i && !taken.has(p.url));
   const look = namesTheme(site, brand);
   const logo = `${(site.video.logo_letter || site.domain.charAt(0)).slice(0, 2)}|${site.video.logo_name || site.domain.replace(/^www\./, '').replace(/\.[a-z.]+$/i, '')}`;
-  report.names_left = queue.length;
+  let reads = 0;
   for (const slot of open) {
-    const name = queue.shift();
-    if (!name) { report.errors.push('name videos: every name on the list has had a video; add names in the website settings'); break; }
-    const seed = parseInt(hash(name + site.id, 6), 16) % 997;
-    const sc = nameScript(site, name, { seed, sayDomain: sayDomain(site) });
-    const item = { id: `${slot.at.toISOString().slice(0, 10).replace(/-/g, '')}-n${hash(name + slot.key, 7)}`, format: 'names', name,
-      slot: slot.key, url: site.video.names_url || `https://${site.domain}/`, publish_at: slot.at.toISOString(), created: new Date().toISOString(),
+    let p, sc, seed;
+    while ((p = queue.shift())) {
+      seed = parseInt(hash(p.url + site.id, 6), 16) % 997;
+      if (p.kind === 'name' || p.kind === 'letter') { sc = nameScript(site, p.text, { seed, sayDomain: sayDomain(site), letter: p.kind === 'letter' }); break; }
+      // a style, app or symbol page: read it as it is now (its own styles, typed with this video's words)
+      if (!browser || reads >= 40 || timeLeft() < 5 * 60000) { p = null; break; }
+      reads++;
+      const text = sampleFor(p.slug, seed);
+      let page = null;
+      try { page = await readSitePage(browser, p.url, text); } catch (e) { log('page read failed:', e.message.slice(0, 120)); }
+      if (page?.kind === 'styles' && page.rows.length >= 4) { sc = pageScript(site, { ...page, text }, { seed, sayDomain: sayDomain(site), slug: p.slug }); break; }
+      if (page?.kind === 'symbols') { sc = pageScript(site, page, { seed, sayDomain: sayDomain(site), slug: p.slug }); break; }
+      // nothing a video can show: not tried again until the repeat time is up
+      S.videoHistory[p.url] = { last: new Date().toISOString(), skipped: true };
+      report.pages_skipped = (report.pages_skipped || 0) + 1;
+    }
+    if (!p) { if (!queue.length && pages.length) report.errors.push(`name videos: every page has a video (a page gets another after ${Math.round(repeat / 86400000)} days)`); break; }
+    const item = { id: `${slot.at.toISOString().slice(0, 10).replace(/-/g, '')}-n${hash(p.url + slot.key, 7)}`, format: 'names', name: p.text || sc.beats[0].title, page: true,
+      slot: slot.key, url: p.url, publish_at: slot.at.toISOString(), created: new Date().toISOString(),
       title: sc.title, description: sc.description, fb_caption: sc.fb_caption, hashtags: sc.hashtags, source: '', cover: sc.cover,
       mascot: 'none', theme: look, logo, voice: defaultVoice(site), beats: sc.beats };
     item.hash = itemHash(item, site);
     S.videos.push(item);
-    S.videoHistory['n:' + name] = { last: item.publish_at };
+    S.videoHistory[p.url] = { last: item.publish_at };
     report.names_planned = (report.names_planned || 0) + 1;
   }
   report.names_left = queue.length;
+  report.stock_left = names().filter(v => !isPage(v) && Date.parse(v.publish_at) > now).length;
 }
 /** Name videos: deep background in the brand's hue, the brand colour for buttons, a warm second colour. */
 export function namesTheme(site, brand) {
