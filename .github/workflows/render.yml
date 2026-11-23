@@ -16,6 +16,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # the voice engine's installer would fetch a GPU add-on these machines cannot use (and whose download now fails)
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+  npm_config_onnxruntime_node_install_cuda: skip
   HYPIT_SHA: 67c15455832cea5eed8198407c488116921f5e6a
 
 jobs:
